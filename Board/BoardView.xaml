@@ -1,0 +1,2683 @@
+<UserControl
+    x:Class="InkCanvasForPDF.Board.BoardView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:Controls="http://schemas.microsoft.com/netfx/2009/xaml/presentation"
+    xmlns:board="clr-namespace:InkCanvasForPDF.Board"
+    xmlns:ikw="http://schemas.inkore.net/lib/ui/wpf"
+    xmlns:sys="clr-namespace:System;assembly=mscorlib"
+    xmlns:ui="http://schemas.inkore.net/lib/ui/wpf/modern"
+    xmlns:ic="clr-namespace:FluentIcons.Wpf;assembly=FluentIcons.Wpf">
+    <!--
+        画板视图：整块移植自 Ink-Canvas-Artistry 4.9.4 MainWindow.xaml 画板区段（L74-2412）。
+        元素名全部保留 ICA 原名，Board/MainWindow_cs/*.cs partial 直接引用。
+        非全屏：由 MainWindow 放置在标题栏以下的根 Grid 内（跨 Row0+Row1）。
+    -->
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Resources/BoardDrawShapeImageDictionary.xaml" />
+                <ResourceDictionary Source="Resources/DrawShapeImageDictionary.xaml" />
+                <ResourceDictionary Source="Resources/IconImageDictionary.xaml" />
+                <ResourceDictionary Source="Resources/Styles/Light-Board.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <!--  FloatBar 画刷不再兜底：App 级 Theme/Light-Dark.xaml 常驻且为用户指定色，画板与 PDF 同源随主题切换  -->
+        </ResourceDictionary>
+    </UserControl.Resources>
+    <Grid
+        x:Name="Main_Grid"
+        Background="#01FFFFFF"
+        PreviewMouseDown="Main_Grid_ShapePanelOutsideDown">
+        <Grid Name="GridBackgroundCoverHolder">
+            <Grid
+                Name="GridBackgroundCover"
+                Background="#1F1F1F"
+                Visibility="Collapsed" />
+        </Grid>
+        <!--  // 画板 //  -->
+        <board:BoardInkCanvas
+            x:Name="inkCanvas"
+            Background="Transparent"
+            Cursor="Pen"
+            EditingModeChanged="inkCanvas_EditingModeChanged"
+            ForceCursor="False"
+            IsManipulationEnabled="True"
+            ManipulationCompleted="Main_Grid_ManipulationCompleted"
+            ManipulationDelta="Main_Grid_ManipulationDelta"
+            ManipulationInertiaStarting="inkCanvas_ManipulationInertiaStarting"
+            ManipulationStarting="inkCanvas_ManipulationStarting"
+            MouseDown="inkCanvas_MouseDown"
+            MouseMove="inkCanvas_MouseMove"
+            MouseUp="inkCanvas_MouseUp"
+            PreviewMouseWheel="inkCanvas_PreviewMouseWheel"
+            PreviewTouchDown="inkCanvas_PreviewTouchDown"
+            PreviewTouchUp="inkCanvas_PreviewTouchUp"
+            SelectionChanged="inkCanvas_SelectionChanged"
+            StrokeCollected="inkCanvas_StrokeCollected"
+            TouchDown="Main_Grid_TouchDown"
+            TouchMove="inkCanvas_TouchMove"
+            TouchUp="Main_Grid_TouchUp" />
+        <!--  board:BoardInkCanvas = InkCanvas 子类：构造函数内装配时间笔锋的自定义 DynamicRenderer（该属性为 protected，无法外部替换）  -->
+        <!--  // 选择选项窗口 //  -->
+        <Grid Visibility="{Binding ElementName=inkCanvas, Path=Visibility}">
+            <Grid
+                Name="GridInkCanvasSelectionCover"
+                Background="#01FFFFFF"
+                IsManipulationEnabled="True"
+                ManipulationCompleted="GridInkCanvasSelectionCover_ManipulationCompleted"
+                ManipulationDelta="GridInkCanvasSelectionCover_ManipulationDelta"
+                ManipulationStarting="GridInkCanvasSelectionCover_ManipulationStarting"
+                MouseDown="GridInkCanvasSelectionCover_MouseDown"
+                MouseMove="GridInkCanvasSelectionCover_MouseMove"
+                MouseUp="GridInkCanvasSelectionCover_MouseUp"
+                Opacity="0.01"
+                PreviewTouchDown="GridInkCanvasSelectionCover_PreviewTouchDown"
+                PreviewTouchUp="GridInkCanvasSelectionCover_PreviewTouchUp"
+                Visibility="Visible" />
+            <Border
+                x:Name="BorderStrokeSelectionControl"
+                Height="80"
+                Margin="0,65,0,0"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Background="{DynamicResource FloatBarBackground}"
+                BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="5"
+                Visibility="{Binding ElementName=GridInkCanvasSelectionCover, Path=Visibility}">
+                <Viewbox>
+                    <ikw:SimpleStackPanel
+                        Height="80"
+                        Orientation="Horizontal"
+                        Spacing="6">
+                        <ikw:SimpleStackPanel
+                            Margin="4,0,0,0"
+                            VerticalAlignment="Center"
+                            Spacing="2">
+                            <Border CornerRadius="5">
+                                <ToggleButton
+                                    x:Name="ToggleButtonStrokeSelectionClone"
+                                    Width="90"
+                                    Height="35"
+                                    Padding="0"
+                                    Background="{DynamicResource FloatBarBackground}"
+                                    Checked="BorderStrokeSelectionClone_Click"
+                                    IsChecked="False"
+                                    Unchecked="BorderStrokeSelectionClone_Click">
+                                    <ikw:SimpleStackPanel
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Orientation="Horizontal"
+                                        Spacing="2">
+                                        <ui:FontIcon
+                                            x:Name="IconStrokeSelectionClone"
+                                            Width="18"
+                                            Height="18"
+                                            FontFamily="{StaticResource FluentIconFontFamily}"
+                                            FontSize="16"
+                                            Foreground="{DynamicResource FloatBarForeground}"
+                                            Glyph="" />
+                                        <TextBlock
+                                            VerticalAlignment="Center"
+                                            FontSize="14"
+                                            Foreground="{Binding ElementName=IconStrokeSelectionClone, Path=Foreground}"
+                                            Text="克隆模式" />
+                                    </ikw:SimpleStackPanel>
+                                </ToggleButton>
+                            </Border>
+                            <Button
+                                Width="90"
+                                Height="35"
+                                Padding="0"
+                                Background="{DynamicResource FloatBarBackground}"
+                                Click="BorderStrokeSelectionCloneToBoardOrNewPage_Click">
+                                <ikw:SimpleStackPanel
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Orientation="Horizontal"
+                                    Spacing="2">
+                                    <ui:FontIcon
+                                        Width="18"
+                                        Height="18"
+                                        FontFamily="{StaticResource FluentIconFontFamily}"
+                                        FontSize="16"
+                                        Foreground="{DynamicResource FloatBarForeground}"
+                                        Glyph="" />
+                                    <TextBlock
+                                        x:Name="TextSelectionCloneToNewBoard"
+                                        VerticalAlignment="Center"
+                                        FontSize="14"
+                                        Foreground="{DynamicResource FloatBarForeground}"
+                                        Text="衍至画板" />
+                                </ikw:SimpleStackPanel>
+                            </Button>
+                        </ikw:SimpleStackPanel>
+                        <ikw:SimpleStackPanel VerticalAlignment="Center" Spacing="4">
+                            <Border
+                                Height="33"
+                                Padding="5,0"
+                                Background="{DynamicResource FloatBarBackground}"
+                                CornerRadius="3">
+                                <ikw:SimpleStackPanel Orientation="Horizontal" Spacing="1.5">
+                                    <ui:FontIcon
+                                        Width="18"
+                                        Height="18"
+                                        FontFamily="{StaticResource FluentIconFontFamily}"
+                                        FontSize="14"
+                                        Foreground="{DynamicResource FloatBarForeground}"
+                                        Glyph="">
+                                        <ui:FontIcon.RenderTransformOrigin>
+                                            <Point X="0.5" Y="0.5" />
+                                        </ui:FontIcon.RenderTransformOrigin>
+                                        <ui:FontIcon.RenderTransform>
+                                            <TransformGroup>
+                                                <RotateTransform Angle="90" />
+                                                <ScaleTransform ScaleX="1" ScaleY="-1" />
+                                            </TransformGroup>
+                                        </ui:FontIcon.RenderTransform>
+                                    </ui:FontIcon>
+                                    <TextBlock
+                                        Margin="0,0,2,0"
+                                        VerticalAlignment="Center"
+                                        FontSize="14"
+                                        Foreground="{DynamicResource FloatBarForeground}"
+                                        Text="逆旋" />
+                                    <Button
+                                        Width="30"
+                                        Height="30"
+                                        Padding="0"
+                                        Background="{DynamicResource FloatBarBackground}"
+                                        Click="BtnAnticlockwiseRotate15_Click">
+                                        <TextBlock
+                                            VerticalAlignment="Center"
+                                            FontSize="14"
+                                            Foreground="{DynamicResource FloatBarForeground}"
+                                            Text="15°" />
+                                    </Button>
+                                    <Button
+                                        Width="30"
+                                        Height="30"
+                                        Padding="0"
+                                        Background="{DynamicResource FloatBarBackground}"
+                                        Click="BtnAnticlockwiseRotate45_Click">
+                                        <TextBlock
+                                            VerticalAlignment="Center"
+                                            FontSize="14"
+                                            Foreground="{DynamicResource FloatBarForeground}"
+                                            Text="45°" />
+                                    </Button>
+                                    <Button
+                                        Width="30"
+                                        Height="30"
+                                        Padding="0"
+                                        Background="{DynamicResource FloatBarBackground}"
+                                        Click="BtnAnticlockwiseRotate90_Click">
+                                        <TextBlock
+                                            VerticalAlignment="Center"
+                                            FontSize="14"
+                                            Foreground="{DynamicResource FloatBarForeground}"
+                                            Text="90°" />
+                                    </Button>
+                                </ikw:SimpleStackPanel>
+                            </Border>
+                            <Border
+                                Height="33"
+                                Padding="5,0"
+                                Background="{DynamicResource FloatBarBackground}"
+                                CornerRadius="3">
+                                <ikw:SimpleStackPanel Orientation="Horizontal" Spacing="1.5">
+                                    <ui:FontIcon
+                                        Width="18"
+                                        Height="18"
+                                        FontFamily="{StaticResource FluentIconFontFamily}"
+                                        FontSize="14"
+                                        Foreground="{DynamicResource FloatBarForeground}"
+                                        Glyph="">
+                                        <ui:FontIcon.RenderTransformOrigin>
+                                            <Point X="0.5" Y="0.5" />
+                                        </ui:FontIcon.RenderTransformOrigin>
+                                        <ui:FontIcon.RenderTransform>
+                                            <RotateTransform Angle="-90" />
+                                        </ui:FontIcon.RenderTransform>
+                                    </ui:FontIcon>
+                                    <TextBlock
+                                        Margin="0,0,2,0"
+                                        VerticalAlignment="Center"
+                                        FontSize="14"
+                                        Foreground="{DynamicResource FloatBarForeground}"
+                                        Text="顺旋" />
+                                    <Button
+                                        Width="30"
+                                        Height="30"
+                                        Padding="0"
+                                        Background="{DynamicResource FloatBarBackground}"
+                                        Click="BtnClockwiseRotate15_Click">
+                                        <TextBlock
+                                            VerticalAlignment="Center"
+                                            FontSize="14"
+                                            Foreground="{DynamicResource FloatBarForeground}"
+                                            Text="15°" />
+                                    </Button>
+                                    <Button
+                                        Width="30"
+                                        Height="30"
+                                        Padding="0"
+                                        Background="{DynamicResource FloatBarBackground}"
+                                        Click="BtnClockwiseRotate45_Click">
+                                        <TextBlock
+                                            VerticalAlignment="Center"
+                                            FontSize="14"
+                                            Foreground="{DynamicResource FloatBarForeground}"
+                                            Text="45°" />
+                                    </Button>
+                                    <Button
+                                        Width="30"
+                                        Height="30"
+                                        Padding="0"
+                                        Background="{DynamicResource FloatBarBackground}"
+                                        Click="BtnClockwiseRotate90_Click">
+                                        <TextBlock
+                                            VerticalAlignment="Center"
+                                            FontSize="14"
+                                            Foreground="{DynamicResource FloatBarForeground}"
+                                            Text="90°" />
+                                    </Button>
+                                </ikw:SimpleStackPanel>
+                            </Border>
+                        </ikw:SimpleStackPanel>
+                        <ikw:SimpleStackPanel VerticalAlignment="Center" Spacing="2">
+                            <Button
+                                Width="90"
+                                Height="35"
+                                Padding="0"
+                                Background="{DynamicResource FloatBarBackground}"
+                                Click="BtnFlipHorizontal_Click">
+                                <ikw:SimpleStackPanel
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Orientation="Horizontal"
+                                    Spacing="2">
+                                    <ikw:SimpleStackPanel
+                                        Width="18"
+                                        Height="18"
+                                        Orientation="Vertical">
+                                        <ui:FontIcon
+                                            Width="18"
+                                            Height="18"
+                                            FontFamily="{StaticResource FluentIconFontFamily}"
+                                            FontSize="16"
+                                            Foreground="{DynamicResource FloatBarForeground}"
+                                            Glyph="" />
+                                        <ui:FontIcon
+                                            Width="18"
+                                            Height="18"
+                                            Margin="0,-18,-1,0"
+                                            FontFamily="{StaticResource FluentIconFontFamily}"
+                                            FontSize="16"
+                                            Foreground="{DynamicResource FloatBarForeground}"
+                                            Glyph="" />
+                                        <ui:FontIcon
+                                            Width="18"
+                                            Height="18"
+                                            Margin="0,-17,0,0"
+                                            FontFamily="{StaticResource FluentIconFontFamily}"
+                                            FontSize="12"
+                                            Foreground="{DynamicResource FloatBarForeground}"
+                                            Glyph="">
+                                            <ui:FontIcon.RenderTransformOrigin>
+                                                <Point X="0.5" Y="0.5" />
+                                            </ui:FontIcon.RenderTransformOrigin>
+                                            <ui:FontIcon.RenderTransform>
+                                                <TransformGroup>
+                                                    <RotateTransform Angle="90" />
+                                                    <ScaleTransform ScaleX="-1" ScaleY="-1" />
+                                                </TransformGroup>
+                                            </ui:FontIcon.RenderTransform>
+                                        </ui:FontIcon>
+                                    </ikw:SimpleStackPanel>
+                                    <TextBlock
+                                        VerticalAlignment="Center"
+                                        FontSize="14"
+                                        Foreground="{DynamicResource FloatBarForeground}"
+                                        Text="水平翻转" />
+                                </ikw:SimpleStackPanel>
+                            </Button>
+                            <Button
+                                Width="90"
+                                Height="35"
+                                Padding="0"
+                                Background="{DynamicResource FloatBarBackground}"
+                                Click="BtnFlipVertical_Click">
+                                <ikw:SimpleStackPanel
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Orientation="Horizontal"
+                                    Spacing="2">
+                                    <ikw:SimpleStackPanel
+                                        Width="18"
+                                        Height="18"
+                                        Orientation="Vertical">
+                                        <ui:FontIcon
+                                            Width="18"
+                                            Height="18"
+                                            FontFamily="{StaticResource FluentIconFontFamily}"
+                                            FontSize="16"
+                                            Foreground="{DynamicResource FloatBarForeground}"
+                                            Glyph="" />
+                                        <ui:FontIcon
+                                            Width="18"
+                                            Height="18"
+                                            Margin="0,-19,0,0"
+                                            FontFamily="{StaticResource FluentIconFontFamily}"
+                                            FontSize="16"
+                                            Foreground="{DynamicResource FloatBarForeground}"
+                                            Glyph="">
+                                            <ui:FontIcon.RenderTransformOrigin>
+                                                <Point X="0.5" Y="0.5" />
+                                            </ui:FontIcon.RenderTransformOrigin>
+                                            <ui:FontIcon.RenderTransform>
+                                                <TransformGroup>
+                                                    <RotateTransform Angle="90" />
+                                                    <ScaleTransform ScaleX="-1" ScaleY="-1" />
+                                                </TransformGroup>
+                                            </ui:FontIcon.RenderTransform>
+                                        </ui:FontIcon>
+                                        <ui:FontIcon
+                                            Width="18"
+                                            Height="18"
+                                            Margin="0,-18,0,0"
+                                            FontFamily="{StaticResource FluentIconFontFamily}"
+                                            FontSize="12"
+                                            Foreground="{DynamicResource FloatBarForeground}"
+                                            Glyph="" />
+                                    </ikw:SimpleStackPanel>
+                                    <TextBlock
+                                        VerticalAlignment="Center"
+                                        FontSize="14"
+                                        Foreground="{DynamicResource FloatBarForeground}"
+                                        Text="竖直翻转" />
+                                </ikw:SimpleStackPanel>
+                            </Button>
+                        </ikw:SimpleStackPanel>
+                        <ikw:SimpleStackPanel
+                            Margin="0,0,4,0"
+                            VerticalAlignment="Center"
+                            Spacing="4">
+                            <ikw:SimpleStackPanel Orientation="Horizontal" Spacing="4">
+                                <Border
+                                    Width="155"
+                                    Height="33"
+                                    Padding="5,0"
+                                    HorizontalAlignment="Left"
+                                    Background="{DynamicResource FloatBarBackground}"
+                                    CornerRadius="3">
+                                    <ikw:SimpleStackPanel Orientation="Horizontal" Spacing="1.5">
+                                        <ui:FontIcon
+                                            Width="18"
+                                            Height="18"
+                                            FontFamily="{StaticResource FluentIconFontFamily}"
+                                            FontSize="14"
+                                            Foreground="{DynamicResource FloatBarForeground}"
+                                            Glyph="" />
+                                        <TextBlock
+                                            Margin="0,0,2,0"
+                                            VerticalAlignment="Center"
+                                            FontSize="14"
+                                            Foreground="{DynamicResource FloatBarForeground}"
+                                            Text="粗细" />
+                                        <Button
+                                            Width="30"
+                                            Height="30"
+                                            Padding="0"
+                                            Background="{DynamicResource FloatBarBackground}"
+                                            Click="GridPenWidthIncrease_Click">
+                                            <ui:FontIcon
+                                                Width="18"
+                                                Height="18"
+                                                FontFamily="{StaticResource FluentIconFontFamily}"
+                                                FontSize="12"
+                                                Foreground="{DynamicResource FloatBarForeground}"
+                                                Glyph="" />
+                                        </Button>
+                                        <Button
+                                            Width="30"
+                                            Height="30"
+                                            Padding="0"
+                                            Background="{DynamicResource FloatBarBackground}"
+                                            Click="GridPenWidthDecrease_Click">
+                                            <ui:FontIcon
+                                                Width="18"
+                                                Height="18"
+                                                FontFamily="{StaticResource FluentIconFontFamily}"
+                                                FontSize="12"
+                                                Foreground="{DynamicResource FloatBarForeground}"
+                                                Glyph="" />
+                                        </Button>
+                                        <Button
+                                            Width="30"
+                                            Height="30"
+                                            Padding="0"
+                                            Background="{DynamicResource FloatBarBackground}"
+                                            Click="GridPenWidthRestore_Click">
+                                            <ui:FontIcon
+                                                Width="18"
+                                                Height="18"
+                                                FontFamily="{StaticResource FluentIconFontFamily}"
+                                                FontSize="12"
+                                                Foreground="{DynamicResource FloatBarForeground}"
+                                                Glyph="" />
+                                        </Button>
+                                    </ikw:SimpleStackPanel>
+                                </Border>
+                                <Button
+                                    Width="90"
+                                    Height="35"
+                                    Padding="0"
+                                    Background="{DynamicResource FloatBarBackground}"
+                                    Click="BtnStrokeSelectionSaveToImage_Click">
+                                    <ikw:SimpleStackPanel
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Orientation="Horizontal"
+                                        Spacing="2">
+                                        <ui:FontIcon
+                                            Width="18"
+                                            Height="18"
+                                            FontFamily="{StaticResource FluentIconFontFamily}"
+                                            FontSize="16"
+                                            Foreground="{DynamicResource FloatBarForeground}"
+                                            Glyph="" />
+                                        <TextBlock
+                                            VerticalAlignment="Center"
+                                            FontSize="14"
+                                            Foreground="{DynamicResource FloatBarForeground}"
+                                            Text="存为图片" />
+                                    </ikw:SimpleStackPanel>
+                                </Button>
+                                <Button
+                                    Width="90"
+                                    Height="35"
+                                    Padding="0"
+                                    Background="{DynamicResource FloatBarBackground}"
+                                    Click="BorderStrokeSelectionDelete_Click">
+                                    <ikw:SimpleStackPanel
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Orientation="Horizontal"
+                                        Spacing="2">
+                                        <ui:FontIcon
+                                            Width="18"
+                                            Height="18"
+                                            FontFamily="{StaticResource FluentIconFontFamily}"
+                                            FontSize="16"
+                                            Foreground="{DynamicResource FloatBarForeground}"
+                                            Glyph="" />
+                                        <TextBlock
+                                            VerticalAlignment="Center"
+                                            FontSize="14"
+                                            Foreground="{DynamicResource FloatBarForeground}"
+                                            Text="删除" />
+                                    </ikw:SimpleStackPanel>
+                                </Button>
+                            </ikw:SimpleStackPanel>
+                            <Border
+                                Height="33"
+                                Padding="5,0"
+                                Background="{DynamicResource FloatBarBackground}"
+                                CornerRadius="3">
+                                <ikw:SimpleStackPanel Orientation="Horizontal" Spacing="1.5">
+                                    <ui:FontIcon
+                                        Width="18"
+                                        Height="18"
+                                        FontFamily="{StaticResource FluentIconFontFamily}"
+                                        FontSize="14"
+                                        Foreground="{DynamicResource FloatBarForeground}"
+                                        Glyph="" />
+                                    <TextBlock
+                                        Margin="0,0,2,0"
+                                        VerticalAlignment="Center"
+                                        FontSize="14"
+                                        Foreground="{DynamicResource FloatBarForeground}"
+                                        Text="颜色" />
+                                    <Button
+                                        Width="30"
+                                        Height="30"
+                                        Padding="0"
+                                        Background="{DynamicResource FloatBarBackground}"
+                                        Click="BtnColorBlack_Click">
+                                        <Border
+                                            Width="16"
+                                            Height="16"
+                                            Background="Black"
+                                            BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                            BorderThickness="1.5"
+                                            CornerRadius="100" />
+                                    </Button>
+                                    <Button
+                                        Width="30"
+                                        Height="30"
+                                        Padding="0"
+                                        Background="{DynamicResource FloatBarBackground}"
+                                        Click="BtnColorWhite_Click">
+                                        <Border
+                                            Width="16"
+                                            Height="16"
+                                            Background="White"
+                                            BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                            BorderThickness="1.5"
+                                            CornerRadius="100" />
+                                    </Button>
+                                    <Button
+                                        Width="30"
+                                        Height="30"
+                                        Padding="0"
+                                        Background="{DynamicResource FloatBarBackground}"
+                                        Click="BtnColorRed_Click">
+                                        <Border
+                                            Width="16"
+                                            Height="16"
+                                            Background="#dc2626"
+                                            BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                            BorderThickness="1.5"
+                                            CornerRadius="100" />
+                                    </Button>
+                                    <Button
+                                        Width="30"
+                                        Height="30"
+                                        Padding="0"
+                                        Background="{DynamicResource FloatBarBackground}"
+                                        Click="BtnColorOrange_Click">
+                                        <Border
+                                            Width="16"
+                                            Height="16"
+                                            Background="#ea580c"
+                                            BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                            BorderThickness="1.5"
+                                            CornerRadius="100" />
+                                    </Button>
+                                    <Button
+                                        Width="30"
+                                        Height="30"
+                                        Padding="0"
+                                        Background="{DynamicResource FloatBarBackground}"
+                                        Click="BtnColorYellow_Click">
+                                        <Border
+                                            Width="16"
+                                            Height="16"
+                                            Background="#eab308"
+                                            BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                            BorderThickness="1.5"
+                                            CornerRadius="100" />
+                                    </Button>
+                                    <Button
+                                        Width="30"
+                                        Height="30"
+                                        Padding="0"
+                                        Background="{DynamicResource FloatBarBackground}"
+                                        Click="BtnColorGreen_Click">
+                                        <Border
+                                            Width="16"
+                                            Height="16"
+                                            Background="#16a34a"
+                                            BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                            BorderThickness="1.5"
+                                            CornerRadius="100" />
+                                    </Button>
+                                    <Button
+                                        Width="30"
+                                        Height="30"
+                                        Padding="0"
+                                        Background="{DynamicResource FloatBarBackground}"
+                                        Click="BtnColorTeal_Click">
+                                        <Border
+                                            Width="16"
+                                            Height="16"
+                                            Background="#0d9488"
+                                            BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                            BorderThickness="1.5"
+                                            CornerRadius="100" />
+                                    </Button>
+                                    <Button
+                                        Width="30"
+                                        Height="30"
+                                        Padding="0"
+                                        Background="{DynamicResource FloatBarBackground}"
+                                        Click="BtnColorBlue_Click">
+                                        <Border
+                                            Width="16"
+                                            Height="16"
+                                            Background="#2563eb"
+                                            BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                            BorderThickness="1.5"
+                                            CornerRadius="100" />
+                                    </Button>
+                                    <Button
+                                        Width="30"
+                                        Height="30"
+                                        Padding="0"
+                                        Background="{DynamicResource FloatBarBackground}"
+                                        Click="BtnColorPink_Click">
+                                        <Border
+                                            Width="16"
+                                            Height="16"
+                                            Background="#c72ec7"
+                                            BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                            BorderThickness="1.5"
+                                            CornerRadius="100" />
+                                    </Button>
+                                </ikw:SimpleStackPanel>
+                            </Border>
+                        </ikw:SimpleStackPanel>
+                    </ikw:SimpleStackPanel>
+                </Viewbox>
+            </Border>
+        </Grid>
+        <!--  // 画板界面 //  -->
+        <Grid Visibility="{Binding ElementName=GridBackgroundCoverHolder, Path=Visibility}">
+            <!--  左下角  -->
+            <Viewbox
+                x:Name="ViewboxBlackboardLeftSide"
+                Height="55"
+                Margin="3,0,0,0"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Bottom">
+                <Viewbox.LayoutTransform>
+                    <ScaleTransform x:Name="ViewboxBlackboardLeftSideScaleTransform" ScaleX="1" ScaleY="1" />
+                </Viewbox.LayoutTransform>
+                <Grid
+                    x:Name="BlackboardLeftSide"
+                    Height="55"
+                    Margin="3,0,0,0"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Bottom"
+                    Visibility="Visible">
+                    <Grid.Resources>
+                        <!--  定义 SolidColorBrush 资源  -->
+                        <SolidColorBrush x:Key="{x:Static ui:ThemeKeys.ButtonBackgroundKey}" Color="{DynamicResource BoardBarButtonBackgroundKey}" />
+                        <SolidColorBrush x:Key="{x:Static ui:ThemeKeys.ButtonBackgroundPointerOverKey}" Color="{DynamicResource BoardBarButtonBackgroundPointerOverKey}" />
+                        <SolidColorBrush x:Key="{x:Static ui:ThemeKeys.ButtonBackgroundPressedKey}" Color="{DynamicResource BoardBarButtonButtonBackgroundPressedKey}" />
+                        <!--  定义按钮样式  -->
+                        <Style TargetType="Button">
+                            <Setter Property="Background" Value="{StaticResource {x:Static ui:ThemeKeys.ButtonBackgroundKey}}" />
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border
+                                            Background="{TemplateBinding Background}"
+                                            BorderBrush="{TemplateBinding BorderBrush}"
+                                            BorderThickness="{TemplateBinding BorderThickness}"
+                                            CornerRadius="5">
+                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter Property="Background" Value="{StaticResource {x:Static ui:ThemeKeys.ButtonBackgroundPointerOverKey}}" />
+                                            </Trigger>
+                                            <Trigger Property="IsPressed" Value="True">
+                                                <Setter Property="Background" Value="{StaticResource {x:Static ui:ThemeKeys.ButtonBackgroundPressedKey}}" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </Grid.Resources>
+                    <ikw:SimpleStackPanel x:Name="BlackboardLeftBarPanel" Orientation="Horizontal">
+                        <Button
+                            x:Name="BtnWhiteBoardSwitchPrevious"
+                            Width="60"
+                            Height="55"
+                            Padding="0"
+                            BorderThickness="0"
+                            Click="BtnWhiteBoardSwitchPrevious_Click">
+                            <Border
+                                Width="60"
+                                Height="55"
+                                Background="{DynamicResource BoardBarBackground}"
+                                BorderBrush="{DynamicResource BoardBarBorderBrush}"
+                                BorderThickness="1,1,0.25,1"
+                                CornerRadius="5,0,0,5">
+                                <Grid Margin="5">
+                                    <ui:FontIcon
+                                        Width="26"
+                                        Height="26"
+                                        VerticalAlignment="Top"
+                                        FontFamily="{StaticResource FluentIconFontFamily}"
+                                        FontSize="24"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Glyph="" />
+                                    <TextBlock
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Bottom"
+                                        FontSize="12"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Text="上一页" />
+                                </Grid>
+                            </Border>
+                        </Button>
+                        <Border
+                            Width="58"
+                            Height="55"
+                            Background="{DynamicResource BoardBarBackground}"
+                            BorderBrush="{DynamicResource BoardBarBorderBrush}"
+                            BorderThickness="0,1,0.25,1">
+                            <Grid Margin="0,5">
+                                <ikw:SimpleStackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <TextBlock
+                                        Name="TextBlockWhiteBoardIndexInfo"
+                                        Margin="0,4,0,2"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        FontSize="15"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Text="1 / 1" />
+                                    <TextBlock
+                                        Margin="0,3,0,0"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        FontSize="12"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Text="页码" />
+                                </ikw:SimpleStackPanel>
+                            </Grid>
+                        </Border>
+                        <Button
+                            Width="60"
+                            Height="55"
+                            Padding="0"
+                            BorderThickness="0"
+                            Click="BtnWhiteBoardSwitchNext_Click"
+                            IsEnabledChanged="Element_IsEnabledChanged">
+                            <Border
+                                Width="60"
+                                Height="55"
+                                Background="{DynamicResource BoardBarBackground}"
+                                BorderBrush="{DynamicResource BoardBarBorderBrush}"
+                                BorderThickness="0,1,1,1"
+                                CornerRadius="0,5,5,0">
+                                <Grid Margin="5">
+                                    <ui:FontIcon
+                                        x:Name="BoardLeftPannelNextPage1"
+                                        Width="26"
+                                        Height="26"
+                                        VerticalAlignment="Top"
+                                        FontFamily="{StaticResource FluentIconFontFamily}"
+                                        FontSize="24"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Glyph=""
+                                        IsEnabled="True"
+                                        IsEnabledChanged="Element_IsEnabledChanged" />
+                                    <ui:FontIcon
+                                        x:Name="BoardLeftPannelNextPage2"
+                                        Width="0"
+                                        Height="26"
+                                        VerticalAlignment="Top"
+                                        FontFamily="{StaticResource FluentIconFontFamily}"
+                                        FontSize="24"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Glyph=""
+                                        Opacity="{Binding ElementName=BoardLeftPannelNextPage1, Path=Opacity}" />
+                                    <TextBlock
+                                        x:Name="BoardLeftPannelNextPageTextBlock"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Bottom"
+                                        FontSize="12"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Opacity="{Binding ElementName=BoardLeftPannelNextPage1, Path=Opacity}"
+                                        Text="加页" />
+                                </Grid>
+                            </Border>
+                        </Button>
+                        <Button
+                            Width="55"
+                            Height="55"
+                            Margin="5,0,0,0"
+                            Padding="0"
+                            BorderThickness="0"
+                            Click="ImageBlackboard_Click">
+                            <Border
+                                Width="55"
+                                Height="55"
+                                Background="{DynamicResource BoardBarBackground}"
+                                BorderBrush="{DynamicResource BoardBarBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="5">
+                                <Grid Margin="5">
+                                    <!--  居中微调：同 BtnBoardAddPage，图标墨迹左偏 2px，4px 左外边距推回中心  -->
+                                    <ui:FontIcon
+                                        Width="26"
+                                        Height="26"
+                                        Margin="4,0,0,0"
+                                        VerticalAlignment="Top"
+                                        FontFamily="{StaticResource FluentIconFontFamily}"
+                                        FontSize="24"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Glyph="&#xe944;" />
+                                    <TextBlock
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Bottom"
+                                        FontSize="12"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Text="退出" />
+                                </Grid>
+                            </Border>
+                        </Button>
+                    </ikw:SimpleStackPanel>
+                </Grid>
+            </Viewbox>
+            <!--  中间  -->
+            <Viewbox
+                x:Name="ViewboxBlackboardCenterSide"
+                Height="55"
+                Margin="3,0,0,0"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Bottom">
+                <Viewbox.LayoutTransform>
+                    <ScaleTransform x:Name="ViewboxBlackboardCenterSideScaleTransform" ScaleX="1" ScaleY="1" />
+                </Viewbox.LayoutTransform>
+                <Grid
+                    x:Name="BlackboardCenterSide"
+                    Height="55"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Bottom"
+                    Visibility="Visible">
+                    <Grid.Resources>
+                        <!--  定义 SolidColorBrush 资源  -->
+                        <SolidColorBrush x:Key="{x:Static ui:ThemeKeys.ButtonBackgroundKey}" Color="{DynamicResource BoardBarButtonBackgroundKey}" />
+                        <SolidColorBrush x:Key="{x:Static ui:ThemeKeys.ButtonBackgroundPointerOverKey}" Color="{DynamicResource BoardBarButtonBackgroundPointerOverKey}" />
+                        <SolidColorBrush x:Key="{x:Static ui:ThemeKeys.ButtonBackgroundPressedKey}" Color="{DynamicResource BoardBarButtonButtonBackgroundPressedKey}" />
+                        <!--  定义按钮样式  -->
+                        <Style TargetType="Button">
+                            <Setter Property="Background" Value="{StaticResource {x:Static ui:ThemeKeys.ButtonBackgroundKey}}" />
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border
+                                            Background="{TemplateBinding Background}"
+                                            BorderBrush="{TemplateBinding BorderBrush}"
+                                            BorderThickness="{TemplateBinding BorderThickness}"
+                                            CornerRadius="5">
+                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter Property="Background" Value="{StaticResource {x:Static ui:ThemeKeys.ButtonBackgroundPointerOverKey}}" />
+                                            </Trigger>
+                                            <Trigger Property="IsPressed" Value="True">
+                                                <Setter Property="Background" Value="{StaticResource {x:Static ui:ThemeKeys.ButtonBackgroundPressedKey}}" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </Grid.Resources>
+                    <ikw:SimpleStackPanel x:Name="BlackboardCenterBarPanel" Orientation="Horizontal">
+                        <Button
+                            x:Name="BoardGestureBtn"
+                            Width="60"
+                            Height="55"
+                            Padding="0"
+                            BorderThickness="0"
+                            Click="TwoFingerGestureBorder_Click">
+                            <Border
+                                Width="60"
+                                Height="55"
+                                Background="{DynamicResource BoardBarBackground}"
+                                BorderBrush="{DynamicResource BoardBarBorderBrush}"
+                                BorderThickness="1,1,0.25,1"
+                                CornerRadius="5,0,0,5">
+                                <Grid Margin="5">
+                                    <ui:FontIcon
+                                        x:Name="BoardEnableTwoFingerGestureBtn"
+                                        Width="26"
+                                        Height="26"
+                                        VerticalAlignment="Top"
+                                        FontFamily="{StaticResource FluentIconFontFamily}"
+                                        FontSize="28"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Glyph="" />
+                                    <TextBlock
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Bottom"
+                                        FontSize="12"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Text="手势" />
+                                </Grid>
+                            </Border>
+                        </Button>
+                        <Popup
+                            x:Name="BoardGesturePopup"
+                            AllowsTransparency="True"
+                            CustomPopupPlacementCallback="BoardGesturePopup_CustomPopupPlacement"
+                            IsOpen="False"
+                            Placement="Custom"
+                            PlacementTarget="{Binding ElementName=BoardGestureBtn}"
+                            PopupAnimation="None"
+                            StaysOpen="True">
+                            <Border
+                                x:Name="BoardTwoFingerGestureBorder"
+                                Background="{DynamicResource FloatBarBackgroundWithoutOpacity}"
+                                BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                BorderThickness="2"
+                                CornerRadius="10">
+                                <ikw:SimpleStackPanel Margin="12" Spacing="-2.5">
+                                    <ikw:SimpleStackPanel
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Orientation="Horizontal"
+                                        Spacing="8">
+                                        <ui:FontIcon
+                                            Width="20"
+                                            Height="20"
+                                            Margin="0,4,0,2"
+                                            FontFamily="{StaticResource FluentIconFontFamily}"
+                                            FontSize="16"
+                                            Foreground="{DynamicResource BoardBarForeground}"
+                                            Glyph="" />
+                                        <Label
+                                            VerticalAlignment="Center"
+                                            Content="多指书写"
+                                            FontSize="12"
+                                            Foreground="{DynamicResource BoardBarForeground}" />
+                                        <Viewbox Width="36" Height="25">
+                                            <ui:ToggleSwitch
+                                                Name="ToggleSwitchEnableMultiTouchMode"
+                                                Width="42"
+                                                MinWidth="0"
+                                                ui:ThemeManager.RequestedTheme="{DynamicResource BoardTheme}"
+                                                IsOn="False"
+                                                OffContent=""
+                                                OnContent=""
+                                                Toggled="ToggleSwitchEnableMultiTouchMode_Toggled" />
+                                        </Viewbox>
+                                    </ikw:SimpleStackPanel>
+                                    <ikw:SimpleStackPanel
+                                        x:Name="BoardTwoFingerGestureSimpleStackPanel"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Orientation="Horizontal"
+                                        Spacing="8">
+                                        <ui:FontIcon
+                                            Width="20"
+                                            Height="20"
+                                            Margin="0,4,0,2"
+                                            FontFamily="{StaticResource FluentIconFontFamily}"
+                                            FontSize="16"
+                                            Foreground="{DynamicResource BoardBarForeground}"
+                                            Glyph="" />
+                                        <Label
+                                            VerticalAlignment="Center"
+                                            Content="双指移动"
+                                            FontSize="12"
+                                            Foreground="{DynamicResource BoardBarForeground}" />
+                                        <Viewbox Width="36" Height="25">
+                                            <ui:ToggleSwitch
+                                                Name="ToggleSwitchEnableTwoFingerTranslate"
+                                                Width="42"
+                                                MinWidth="0"
+                                                ui:ThemeManager.RequestedTheme="{DynamicResource BoardTheme}"
+                                                IsOn="False"
+                                                OffContent=""
+                                                OnContent=""
+                                                Toggled="ToggleSwitchEnableTwoFingerTranslate_Toggled" />
+                                        </Viewbox>
+                                    </ikw:SimpleStackPanel>
+                                    <ikw:SimpleStackPanel
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Opacity="{Binding ElementName=BoardTwoFingerGestureSimpleStackPanel, Path=Opacity}"
+                                        Orientation="Horizontal"
+                                        Spacing="8">
+                                        <ui:FontIcon
+                                            Width="20"
+                                            Height="20"
+                                            Margin="0,4,0,2"
+                                            FontFamily="{StaticResource FluentIconFontFamily}"
+                                            FontSize="16"
+                                            Foreground="{DynamicResource BoardBarForeground}"
+                                            Glyph="" />
+                                        <Label
+                                            VerticalAlignment="Center"
+                                            Content="双指缩放"
+                                            FontSize="12"
+                                            Foreground="{DynamicResource BoardBarForeground}" />
+                                        <Viewbox Width="36" Height="25">
+                                            <ui:ToggleSwitch
+                                                Name="ToggleSwitchEnableTwoFingerZoom"
+                                                Width="42"
+                                                MinWidth="0"
+                                                ui:ThemeManager.RequestedTheme="{DynamicResource BoardTheme}"
+                                                IsOn="False"
+                                                OffContent=""
+                                                OnContent=""
+                                                Toggled="ToggleSwitchEnableTwoFingerZoom_Toggled" />
+                                        </Viewbox>
+                                    </ikw:SimpleStackPanel>
+                                    <ikw:SimpleStackPanel
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Opacity="{Binding ElementName=BoardTwoFingerGestureSimpleStackPanel, Path=Opacity}"
+                                        Orientation="Horizontal"
+                                        Spacing="8">
+                                        <ui:FontIcon
+                                            Width="20"
+                                            Height="20"
+                                            Margin="0,4,0,2"
+                                            FontFamily="{StaticResource FluentIconFontFamily}"
+                                            FontSize="16"
+                                            Foreground="{DynamicResource BoardBarForeground}"
+                                            Glyph="" />
+                                        <Label
+                                            VerticalAlignment="Center"
+                                            Content="双指旋转"
+                                            FontSize="12"
+                                            Foreground="{DynamicResource BoardBarForeground}" />
+                                        <Viewbox Width="36" Height="25">
+                                            <ui:ToggleSwitch
+                                                Name="ToggleSwitchEnableTwoFingerRotation"
+                                                Width="42"
+                                                MinWidth="0"
+                                                ui:ThemeManager.RequestedTheme="{DynamicResource BoardTheme}"
+                                                OffContent=""
+                                                OnContent=""
+                                                Toggled="ToggleSwitchEnableTwoFingerRotation_Toggled" />
+                                        </Viewbox>
+                                    </ikw:SimpleStackPanel>
+                                </ikw:SimpleStackPanel>
+                            </Border>
+                        </Popup>
+                        <Button
+                            Width="60"
+                            Height="55"
+                            Margin="0,0,5,0"
+                            Padding="0"
+                            BorderThickness="0"
+                            Click="BoardChangeBackgroundColorBtn_Click">
+                            <Border
+                                Width="60"
+                                Height="55"
+                                Background="{DynamicResource BoardBarBackground}"
+                                BorderBrush="{DynamicResource BoardBarBorderBrush}"
+                                BorderThickness="0,1,1,1"
+                                CornerRadius="0,5,5,0">
+                                <Grid Margin="5">
+                                    <ui:FontIcon
+                                        Width="26"
+                                        Height="26"
+                                        VerticalAlignment="Top"
+                                        FontFamily="{StaticResource FluentIconFontFamily}"
+                                        FontSize="22"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Glyph="" />
+                                    <TextBlock
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Bottom"
+                                        FontSize="12"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Text="画布" />
+                                </Grid>
+                            </Border>
+                        </Button>
+                        <Button
+                            Width="60"
+                            Height="55"
+                            Padding="0"
+                            BorderThickness="0"
+                            Click="SymbolIconSelect_Click">
+                            <Border
+                                x:Name="BoardSelect"
+                                Width="60"
+                                Height="55"
+                                Background="{DynamicResource BoardBarBackground}"
+                                BorderBrush="{DynamicResource BoardBarBorderBrush}"
+                                BorderThickness="1,1,0.25,1"
+                                CornerRadius="5,0,0,5">
+                                <Grid Margin="5">
+                                    <ikw:SimpleStackPanel
+                                        Width="28"
+                                        Height="28"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Top"
+                                        Background="Transparent"
+                                        Orientation="Horizontal">
+                                        <ui:FontIcon
+                                            Width="28"
+                                            Height="22"
+                                            FontFamily="{StaticResource FluentIconFontFamily}"
+                                            FontSize="22"
+                                            Foreground="{DynamicResource BoardBarForeground}"
+                                            Glyph="" />
+                                        <ui:FontIcon
+                                            Width="10"
+                                            Height="22"
+                                            Margin="-24,0,0,-13"
+                                            FontFamily="{StaticResource FluentIconFontFamily}"
+                                            FontSize="14"
+                                            Foreground="{DynamicResource BoardBarForeground}"
+                                            Glyph="" />
+                                    </ikw:SimpleStackPanel>
+                                    <TextBlock
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Bottom"
+                                        FontSize="12"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Text="选择" />
+                                </Grid>
+                            </Border>
+                        </Button>
+                        <Button
+                            Width="60"
+                            Height="55"
+                            Padding="0"
+                            BorderThickness="0"
+                            Click="PenIcon_Click">
+                            <Border
+                                x:Name="BoardPen"
+                                Width="60"
+                                Height="55"
+                                Background="{DynamicResource BoardBarBackground}"
+                                BorderBrush="{DynamicResource BoardBarBorderBrush}"
+                                BorderThickness="0,1,0.25,1">
+                                <Grid Margin="5">
+                                    <ikw:SimpleStackPanel
+                                        x:Name="BoardPenIcon"
+                                        Width="28"
+                                        Height="28"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Top"
+                                        Background="Transparent"
+                                        Orientation="Horizontal">
+                                        <ui:FontIcon
+                                            Width="28"
+                                            Height="22"
+                                            FontFamily="{StaticResource FluentIconFontFamily}"
+                                            FontSize="22"
+                                            Foreground="{DynamicResource BoardBarForeground}"
+                                            Glyph="" />
+                                    </ikw:SimpleStackPanel>
+                                    <TextBlock
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Bottom"
+                                        FontSize="12"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Text="墨迹" />
+                                </Grid>
+                            </Border>
+                        </Button>
+                        <Popup
+                            x:Name="BoardPenPalettePopup"
+                            AllowsTransparency="True"
+                            CustomPopupPlacementCallback="BoardPenPalettePopup_CustomPopupPlacement"
+                            IsOpen="False"
+                            Placement="Custom"
+                            PlacementTarget="{Binding ElementName=BoardPen}"
+                            PopupAnimation="None"
+                            StaysOpen="True">
+                            <Border
+                                x:Name="BoardPenPalette"
+                                Background="{DynamicResource FloatBarBackgroundWithoutOpacity}"
+                                BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                BorderThickness="2"
+                                CornerRadius="10">
+                                <Border.Resources>
+                                    <sys:Double x:Key="PivotHeaderItemFontSize">18</sys:Double>
+                                    <Style
+                                        x:Key="BoardInkPivotTabItem"
+                                        BasedOn="{StaticResource {x:Static ui:ThemeKeys.TabItemPivotStyleKey}}"
+                                        TargetType="TabItem">
+                                        <Setter Property="Height" Value="36" />
+                                    </Style>
+                                </Border.Resources>
+                                <TabControl
+                                    x:Name="BoardPivotInk"
+                                    HorizontalAlignment="Center"
+                                    Background="Transparent"
+                                    ItemContainerStyle="{StaticResource BoardInkPivotTabItem}"
+                                    SelectionChanged="BoardPivotInk_SelectionChanged"
+                                    Style="{StaticResource TabControlPivotStyle}">
+                                    <TabItem Header="硬笔">
+                                        <ikw:SimpleStackPanel Margin="12,2,12,12" Spacing="8">
+                                            <ikw:SimpleStackPanel
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                Orientation="Horizontal"
+                                                Spacing="4">
+                                                <TextBlock
+                                                    VerticalAlignment="Center"
+                                                    FontSize="14"
+                                                    Foreground="{DynamicResource FloatBarForeground}"
+                                                    Text="抬笔纠正" />
+                                                <ui:ToggleSwitch
+                                                    x:Name="ToggleSwitchEnableInkToShape"
+                                                    MinWidth="0"
+                                                    IsOn="True"
+                                                    OffContent=""
+                                                    OnContent=""
+                                                    Toggled="ToggleSwitchEnableInkToShape_Toggled" />
+                                                <TextBlock
+                                                    Margin="10,0,0,0"
+                                                    VerticalAlignment="Center"
+                                                    FontSize="14"
+                                                    Foreground="{DynamicResource FloatBarForeground}"
+                                                    Text="停顿纠正" />
+                                                <ui:ToggleSwitch
+                                                    x:Name="ToggleSwitchEnablePauseInkToShape"
+                                                    MinWidth="0"
+                                                    OffContent=""
+                                                    OnContent=""
+                                                    Toggled="ToggleSwitchEnablePauseInkToShape_Toggled" />
+                                            </ikw:SimpleStackPanel>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock
+                                                    VerticalAlignment="Center"
+                                                    FontSize="14"
+                                                    Foreground="{DynamicResource FloatBarForeground}"
+                                                    Text="粗细" />
+                                                <Slider
+                                                    x:Name="BoardInkWidthSlider"
+                                                    Grid.Column="1"
+                                                    Margin="10,0,0,0"
+                                                    VerticalAlignment="Center"
+                                                    IsSnapToTickEnabled="True"
+                                                    Maximum="30"
+                                                    Minimum="1"
+                                                    TickFrequency="1"
+                                                    TickPlacement="None"
+                                                    ValueChanged="InkWidthSlider_ValueChanged"
+                                                    Value="5" />
+                                                <TextBlock
+                                                    Grid.Column="2"
+                                                    Margin="10,0,0,0"
+                                                    VerticalAlignment="Center"
+                                                    FontSize="14"
+                                                    Foreground="{DynamicResource FloatBarForeground}"
+                                                    Text="{Binding Value, ElementName=BoardInkWidthSlider, Mode=OneWay}" />
+                                            </Grid>
+                                            <Controls:UniformGrid
+                                                HorizontalAlignment="Center"
+                                                Columns="5"
+                                                Rows="2">
+                                                <Border
+                                                    Width="50"
+                                                    Height="50"
+                                                    Margin="4"
+                                                    Background="Transparent"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="1.5"
+                                                    CornerRadius="100"
+                                                    MouseDown="Border_MouseDown"
+                                                    MouseUp="ColorThemeSwitch_MouseUp">
+                                                    <Grid Margin="5">
+                                                        <ui:FontIcon
+                                                            x:Name="BoardColorThemeSwitchIcon"
+                                                            Width="26"
+                                                            Height="26"
+                                                            VerticalAlignment="Top"
+                                                            FontFamily="{StaticResource FluentIconFontFamily}"
+                                                            Foreground="{DynamicResource FloatBarForeground}"
+                                                            Glyph="" />
+                                                        <TextBlock
+                                                            x:Name="BoardColorThemeSwitchTextBlock"
+                                                            HorizontalAlignment="Center"
+                                                            VerticalAlignment="Bottom"
+                                                            FontSize="13"
+                                                            Foreground="{DynamicResource FloatBarForeground}"
+                                                            Text="亮系" />
+                                                    </Grid>
+                                                </Border>
+                                                <Border
+                                                    x:Name="BoardBorderPenColorBlack"
+                                                    Width="50"
+                                                    Height="50"
+                                                    Margin="4"
+                                                    Background="Black"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="1.5"
+                                                    CornerRadius="100"
+                                                    MouseUp="BtnColorBlack_Click">
+                                                    <Viewbox
+                                                        Name="BoardViewboxBtnColorBlackContent"
+                                                        Margin="8"
+                                                        Visibility="Collapsed">
+                                                        <Image
+                                                            Width="24"
+                                                            Height="24"
+                                                            VerticalAlignment="Top"
+                                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                                            Source="/Resources/Icons-png/checked-white.png" />
+                                                    </Viewbox>
+                                                </Border>
+                                                <Border
+                                                    x:Name="BoardBorderPenColorWhite"
+                                                    Width="50"
+                                                    Height="50"
+                                                    Margin="4"
+                                                    Background="White"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="1.5"
+                                                    CornerRadius="100"
+                                                    MouseUp="BtnColorWhite_Click">
+                                                    <Viewbox
+                                                        Name="BoardViewboxBtnColorWhiteContent"
+                                                        Margin="8"
+                                                        Visibility="Collapsed">
+                                                        <Image
+                                                            Width="24"
+                                                            Height="24"
+                                                            VerticalAlignment="Top"
+                                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                                            Source="/Resources/Icons-png/checked-black.png" />
+                                                    </Viewbox>
+                                                </Border>
+                                                <Border
+                                                    x:Name="BoardBorderPenColorRed"
+                                                    Width="50"
+                                                    Height="50"
+                                                    Margin="4"
+                                                    Background="#dc2626"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="1.5"
+                                                    CornerRadius="100"
+                                                    MouseUp="BtnColorRed_Click">
+                                                    <Viewbox
+                                                        Name="BoardViewboxBtnColorRedContent"
+                                                        Margin="8"
+                                                        Visibility="Collapsed">
+                                                        <Image
+                                                            Width="24"
+                                                            Height="24"
+                                                            VerticalAlignment="Top"
+                                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                                            Source="/Resources/Icons-png/checked-white.png" />
+                                                    </Viewbox>
+                                                </Border>
+                                                <Border
+                                                    x:Name="BoardBorderPenColorPink"
+                                                    Width="50"
+                                                    Height="50"
+                                                    Margin="4"
+                                                    Background="#c72ec7"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="1.5"
+                                                    CornerRadius="100"
+                                                    MouseUp="BtnColorPink_Click">
+                                                    <Viewbox
+                                                        Name="BoardViewboxBtnColorPinkContent"
+                                                        Margin="8"
+                                                        Visibility="Collapsed">
+                                                        <Image
+                                                            Width="24"
+                                                            Height="24"
+                                                            VerticalAlignment="Top"
+                                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                                            Source="/Resources/Icons-png/checked-white.png" />
+                                                    </Viewbox>
+                                                </Border>
+                                                <Border
+                                                    x:Name="BoardBorderPenColorOrange"
+                                                    Width="50"
+                                                    Height="50"
+                                                    Margin="4"
+                                                    Background="#ea580c"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="1.5"
+                                                    CornerRadius="100"
+                                                    MouseUp="BtnColorOrange_Click">
+                                                    <Viewbox
+                                                        Name="BoardViewboxBtnColorOrangeContent"
+                                                        Margin="8"
+                                                        Visibility="Collapsed">
+                                                        <Image
+                                                            Width="24"
+                                                            Height="24"
+                                                            VerticalAlignment="Top"
+                                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                                            Source="/Resources/Icons-png/checked-white.png" />
+                                                    </Viewbox>
+                                                </Border>
+                                                <Border
+                                                    x:Name="BoardBorderPenColorYellow"
+                                                    Width="50"
+                                                    Height="50"
+                                                    Margin="4"
+                                                    Background="#eab308"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="1.5"
+                                                    CornerRadius="100"
+                                                    MouseUp="BtnColorYellow_Click">
+                                                    <Viewbox
+                                                        Name="BoardViewboxBtnColorYellowContent"
+                                                        Margin="8"
+                                                        Visibility="Collapsed">
+                                                        <Image
+                                                            Width="24"
+                                                            Height="24"
+                                                            VerticalAlignment="Top"
+                                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                                            Source="/Resources/Icons-png/checked-white.png" />
+                                                    </Viewbox>
+                                                </Border>
+                                                <Border
+                                                    x:Name="BoardBorderPenColorGreen"
+                                                    Width="50"
+                                                    Height="50"
+                                                    Margin="4"
+                                                    Background="#16a34a"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="1.5"
+                                                    CornerRadius="100"
+                                                    MouseUp="BtnColorGreen_Click">
+                                                    <Viewbox
+                                                        Name="BoardViewboxBtnColorGreenContent"
+                                                        Margin="8"
+                                                        Visibility="Collapsed">
+                                                        <Image
+                                                            Width="24"
+                                                            Height="24"
+                                                            VerticalAlignment="Top"
+                                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                                            Source="/Resources/Icons-png/checked-white.png" />
+                                                    </Viewbox>
+                                                </Border>
+                                                <Border
+                                                    x:Name="BoardBorderPenColorTeal"
+                                                    Width="50"
+                                                    Height="50"
+                                                    Margin="4"
+                                                    Background="#0d9488"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="1.5"
+                                                    CornerRadius="100"
+                                                    MouseUp="BtnColorTeal_Click">
+                                                    <Viewbox
+                                                        Name="BoardViewboxBtnColorTealContent"
+                                                        Margin="8"
+                                                        Visibility="Collapsed">
+                                                        <Image
+                                                            Width="24"
+                                                            Height="24"
+                                                            VerticalAlignment="Top"
+                                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                                            Source="/Resources/Icons-png/checked-white.png" />
+                                                    </Viewbox>
+                                                </Border>
+                                                <Border
+                                                    x:Name="BoardBorderPenColorBlue"
+                                                    Width="50"
+                                                    Height="50"
+                                                    Margin="4"
+                                                    Background="#2563eb"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="1.5"
+                                                    CornerRadius="100"
+                                                    MouseUp="BtnColorBlue_Click">
+                                                    <Viewbox
+                                                        Name="BoardViewboxBtnColorBlueContent"
+                                                        Margin="8"
+                                                        Visibility="Collapsed">
+                                                        <Image
+                                                            Width="24"
+                                                            Height="24"
+                                                            VerticalAlignment="Top"
+                                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                                            Source="/Resources/Icons-png/checked-white.png" />
+                                                    </Viewbox>
+                                                </Border>
+                                            </Controls:UniformGrid>
+                                        </ikw:SimpleStackPanel>
+                                    </TabItem>
+                                    <TabItem Header="软笔">
+                                        <ikw:SimpleStackPanel Margin="12,2,12,12" Spacing="8">
+                                            <ikw:SimpleStackPanel
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                Orientation="Horizontal"
+                                                Spacing="4">
+                                                <TextBlock
+                                                    VerticalAlignment="Center"
+                                                    FontSize="14"
+                                                    Foreground="{DynamicResource FloatBarForeground}"
+                                                    Text="抬笔纠正" />
+                                                <ui:ToggleSwitch
+                                                    x:Name="ToggleSwitchEnableInkToShapeSoft"
+                                                    MinWidth="0"
+                                                    IsOn="True"
+                                                    OffContent=""
+                                                    OnContent=""
+                                                    Toggled="ToggleSwitchEnableInkToShape_Toggled" />
+                                                <TextBlock
+                                                    Margin="10,0,0,0"
+                                                    VerticalAlignment="Center"
+                                                    FontSize="14"
+                                                    Foreground="{DynamicResource FloatBarForeground}"
+                                                    Text="停顿纠正" />
+                                                <ui:ToggleSwitch
+                                                    x:Name="ToggleSwitchEnablePauseInkToShapeSoft"
+                                                    MinWidth="0"
+                                                    OffContent=""
+                                                    OnContent=""
+                                                    Toggled="ToggleSwitchEnablePauseInkToShape_Toggled" />
+                                            </ikw:SimpleStackPanel>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock
+                                                    VerticalAlignment="Center"
+                                                    FontSize="14"
+                                                    Foreground="{DynamicResource FloatBarForeground}"
+                                                    Text="粗细" />
+                                                <Slider
+                                                    x:Name="BoardInkWidthSliderSoft"
+                                                    Grid.Column="1"
+                                                    Margin="10,0,0,0"
+                                                    VerticalAlignment="Center"
+                                                    IsSnapToTickEnabled="True"
+                                                    Maximum="30"
+                                                    Minimum="1"
+                                                    TickFrequency="1"
+                                                    TickPlacement="None"
+                                                    ValueChanged="InkWidthSlider_ValueChanged"
+                                                    Value="5" />
+                                                <TextBlock
+                                                    Grid.Column="2"
+                                                    Margin="10,0,0,0"
+                                                    VerticalAlignment="Center"
+                                                    FontSize="14"
+                                                    Foreground="{DynamicResource FloatBarForeground}"
+                                                    Text="{Binding Value, ElementName=BoardInkWidthSliderSoft, Mode=OneWay}" />
+                                            </Grid>
+                                            <Controls:UniformGrid
+                                                HorizontalAlignment="Center"
+                                                Columns="5"
+                                                Rows="2">
+                                                <Border
+                                                    Width="50"
+                                                    Height="50"
+                                                    Margin="4"
+                                                    Background="Transparent"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="1.5"
+                                                    CornerRadius="100"
+                                                    MouseDown="Border_MouseDown"
+                                                    MouseUp="ColorThemeSwitch_MouseUp">
+                                                    <Grid Margin="5">
+                                                        <ui:FontIcon
+                                                            x:Name="BoardColorThemeSwitchIconSoft"
+                                                            Width="26"
+                                                            Height="26"
+                                                            VerticalAlignment="Top"
+                                                            FontFamily="{StaticResource FluentIconFontFamily}"
+                                                            Foreground="{DynamicResource FloatBarForeground}"
+                                                            Glyph="" />
+                                                        <TextBlock
+                                                            x:Name="BoardColorThemeSwitchTextBlockSoft"
+                                                            HorizontalAlignment="Center"
+                                                            VerticalAlignment="Bottom"
+                                                            FontSize="13"
+                                                            Foreground="{DynamicResource FloatBarForeground}"
+                                                            Text="亮系" />
+                                                    </Grid>
+                                                </Border>
+                                                <Border
+                                                    x:Name="BoardBorderPenColorBlackSoft"
+                                                    Width="50"
+                                                    Height="50"
+                                                    Margin="4"
+                                                    Background="Black"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="1.5"
+                                                    CornerRadius="100"
+                                                    MouseUp="BtnColorBlack_Click">
+                                                    <Viewbox
+                                                        Name="BoardViewboxBtnColorBlackSoftContent"
+                                                        Margin="8"
+                                                        Visibility="Collapsed">
+                                                        <Image
+                                                            Width="24"
+                                                            Height="24"
+                                                            VerticalAlignment="Top"
+                                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                                            Source="/Resources/Icons-png/checked-white.png" />
+                                                    </Viewbox>
+                                                </Border>
+                                                <Border
+                                                    x:Name="BoardBorderPenColorWhiteSoft"
+                                                    Width="50"
+                                                    Height="50"
+                                                    Margin="4"
+                                                    Background="White"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="1.5"
+                                                    CornerRadius="100"
+                                                    MouseUp="BtnColorWhite_Click">
+                                                    <Viewbox
+                                                        Name="BoardViewboxBtnColorWhiteSoftContent"
+                                                        Margin="8"
+                                                        Visibility="Collapsed">
+                                                        <Image
+                                                            Width="24"
+                                                            Height="24"
+                                                            VerticalAlignment="Top"
+                                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                                            Source="/Resources/Icons-png/checked-black.png" />
+                                                    </Viewbox>
+                                                </Border>
+                                                <Border
+                                                    x:Name="BoardBorderPenColorRedSoft"
+                                                    Width="50"
+                                                    Height="50"
+                                                    Margin="4"
+                                                    Background="#dc2626"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="1.5"
+                                                    CornerRadius="100"
+                                                    MouseUp="BtnColorRed_Click">
+                                                    <Viewbox
+                                                        Name="BoardViewboxBtnColorRedSoftContent"
+                                                        Margin="8"
+                                                        Visibility="Collapsed">
+                                                        <Image
+                                                            Width="24"
+                                                            Height="24"
+                                                            VerticalAlignment="Top"
+                                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                                            Source="/Resources/Icons-png/checked-white.png" />
+                                                    </Viewbox>
+                                                </Border>
+                                                <Border
+                                                    x:Name="BoardBorderPenColorPinkSoft"
+                                                    Width="50"
+                                                    Height="50"
+                                                    Margin="4"
+                                                    Background="#c72ec7"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="1.5"
+                                                    CornerRadius="100"
+                                                    MouseUp="BtnColorPink_Click">
+                                                    <Viewbox
+                                                        Name="BoardViewboxBtnColorPinkSoftContent"
+                                                        Margin="8"
+                                                        Visibility="Collapsed">
+                                                        <Image
+                                                            Width="24"
+                                                            Height="24"
+                                                            VerticalAlignment="Top"
+                                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                                            Source="/Resources/Icons-png/checked-white.png" />
+                                                    </Viewbox>
+                                                </Border>
+                                                <Border
+                                                    x:Name="BoardBorderPenColorOrangeSoft"
+                                                    Width="50"
+                                                    Height="50"
+                                                    Margin="4"
+                                                    Background="#ea580c"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="1.5"
+                                                    CornerRadius="100"
+                                                    MouseUp="BtnColorOrange_Click">
+                                                    <Viewbox
+                                                        Name="BoardViewboxBtnColorOrangeSoftContent"
+                                                        Margin="8"
+                                                        Visibility="Collapsed">
+                                                        <Image
+                                                            Width="24"
+                                                            Height="24"
+                                                            VerticalAlignment="Top"
+                                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                                            Source="/Resources/Icons-png/checked-white.png" />
+                                                    </Viewbox>
+                                                </Border>
+                                                <Border
+                                                    x:Name="BoardBorderPenColorYellowSoft"
+                                                    Width="50"
+                                                    Height="50"
+                                                    Margin="4"
+                                                    Background="#eab308"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="1.5"
+                                                    CornerRadius="100"
+                                                    MouseUp="BtnColorYellow_Click">
+                                                    <Viewbox
+                                                        Name="BoardViewboxBtnColorYellowSoftContent"
+                                                        Margin="8"
+                                                        Visibility="Collapsed">
+                                                        <Image
+                                                            Width="24"
+                                                            Height="24"
+                                                            VerticalAlignment="Top"
+                                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                                            Source="/Resources/Icons-png/checked-white.png" />
+                                                    </Viewbox>
+                                                </Border>
+                                                <Border
+                                                    x:Name="BoardBorderPenColorGreenSoft"
+                                                    Width="50"
+                                                    Height="50"
+                                                    Margin="4"
+                                                    Background="#16a34a"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="1.5"
+                                                    CornerRadius="100"
+                                                    MouseUp="BtnColorGreen_Click">
+                                                    <Viewbox
+                                                        Name="BoardViewboxBtnColorGreenSoftContent"
+                                                        Margin="8"
+                                                        Visibility="Collapsed">
+                                                        <Image
+                                                            Width="24"
+                                                            Height="24"
+                                                            VerticalAlignment="Top"
+                                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                                            Source="/Resources/Icons-png/checked-white.png" />
+                                                    </Viewbox>
+                                                </Border>
+                                                <Border
+                                                    x:Name="BoardBorderPenColorTealSoft"
+                                                    Width="50"
+                                                    Height="50"
+                                                    Margin="4"
+                                                    Background="#0d9488"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="1.5"
+                                                    CornerRadius="100"
+                                                    MouseUp="BtnColorTeal_Click">
+                                                    <Viewbox
+                                                        Name="BoardViewboxBtnColorTealSoftContent"
+                                                        Margin="8"
+                                                        Visibility="Collapsed">
+                                                        <Image
+                                                            Width="24"
+                                                            Height="24"
+                                                            VerticalAlignment="Top"
+                                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                                            Source="/Resources/Icons-png/checked-white.png" />
+                                                    </Viewbox>
+                                                </Border>
+                                                <Border
+                                                    x:Name="BoardBorderPenColorBlueSoft"
+                                                    Width="50"
+                                                    Height="50"
+                                                    Margin="4"
+                                                    Background="#2563eb"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="1.5"
+                                                    CornerRadius="100"
+                                                    MouseUp="BtnColorBlue_Click">
+                                                    <Viewbox
+                                                        Name="BoardViewboxBtnColorBlueSoftContent"
+                                                        Margin="8"
+                                                        Visibility="Collapsed">
+                                                        <Image
+                                                            Width="24"
+                                                            Height="24"
+                                                            VerticalAlignment="Top"
+                                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                                            Source="/Resources/Icons-png/checked-white.png" />
+                                                    </Viewbox>
+                                                </Border>
+                                            </Controls:UniformGrid>
+                                        </ikw:SimpleStackPanel>
+                                    </TabItem>
+                                    <TabItem Header="荧光笔">
+                                        <ikw:SimpleStackPanel Margin="12,2,12,12" Spacing="8">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock
+                                                    VerticalAlignment="Center"
+                                                    FontSize="14"
+                                                    Foreground="{DynamicResource FloatBarForeground}"
+                                                    Text="不透明度" />
+                                                <Slider
+                                                    x:Name="BoardInkAlphaSlider"
+                                                    Grid.Column="1"
+                                                    Margin="10,0,0,0"
+                                                    VerticalAlignment="Center"
+                                                    IsSnapToTickEnabled="True"
+                                                    Maximum="240"
+                                                    Minimum="20"
+                                                    TickFrequency="20"
+                                                    TickPlacement="None"
+                                                    ValueChanged="InkAlphaSlider_ValueChanged"
+                                                    Value="120" />
+                                                <TextBlock
+                                                    Grid.Column="2"
+                                                    Margin="10,0,0,0"
+                                                    VerticalAlignment="Center"
+                                                    FontSize="14"
+                                                    Foreground="{DynamicResource FloatBarForeground}"
+                                                    Text="{Binding Value, ElementName=BoardInkAlphaSlider, Mode=OneWay}" />
+                                            </Grid>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock
+                                                    VerticalAlignment="Center"
+                                                    FontSize="14"
+                                                    Foreground="{DynamicResource FloatBarForeground}"
+                                                    Text="粗细" />
+                                                <Slider
+                                                    x:Name="BoardInkHighlighterWidthSlider"
+                                                    Grid.Column="1"
+                                                    Margin="10,0,0,0"
+                                                    VerticalAlignment="Center"
+                                                    IsSnapToTickEnabled="True"
+                                                    Maximum="30"
+                                                    Minimum="1"
+                                                    TickFrequency="1"
+                                                    TickPlacement="None"
+                                                    ValueChanged="InkHighlighterWidthSlider_ValueChanged"
+                                                    Value="5" />
+                                                <TextBlock
+                                                    Grid.Column="2"
+                                                    Margin="10,0,0,0"
+                                                    VerticalAlignment="Center"
+                                                    FontSize="14"
+                                                    Foreground="{DynamicResource FloatBarForeground}"
+                                                    Text="{Binding Value, ElementName=BoardInkHighlighterWidthSlider, Mode=OneWay}" />
+                                            </Grid>
+                                            <Controls:UniformGrid HorizontalAlignment="Center" Columns="3">
+                                                <Border
+                                                    x:Name="BoardBorderHighlighterColorRed"
+                                                    Width="60"
+                                                    Height="50"
+                                                    Margin="10,4"
+                                                    Background="#ff5e53"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="2"
+                                                    CornerRadius="8"
+                                                    MouseUp="BtnHighlighterColorRed_Click">
+                                                    <Viewbox
+                                                        x:Name="BoardViewboxBtnHighlighterColorRedContent"
+                                                        Margin="4"
+                                                        Visibility="Collapsed">
+                                                        <Image
+                                                            Width="24"
+                                                            Height="24"
+                                                            VerticalAlignment="Top"
+                                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                                            Source="/Resources/Icons-png/checked-white.png" />
+                                                    </Viewbox>
+                                                </Border>
+                                                <Border
+                                                    x:Name="BoardBorderHighlighterColorOrange"
+                                                    Width="60"
+                                                    Height="50"
+                                                    Margin="10,4"
+                                                    Background="#ff700d"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="2"
+                                                    CornerRadius="8"
+                                                    MouseUp="BtnHighlighterColorOrange_Click">
+                                                    <Viewbox
+                                                        x:Name="BoardViewboxBtnHighlighterColorOrangeContent"
+                                                        Margin="4"
+                                                        Visibility="Collapsed">
+                                                        <Image
+                                                            Width="24"
+                                                            Height="24"
+                                                            VerticalAlignment="Top"
+                                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                                            Source="/Resources/Icons-png/checked-white.png" />
+                                                    </Viewbox>
+                                                </Border>
+                                                <Border
+                                                    x:Name="BoardBorderHighlighterColorYellow"
+                                                    Width="60"
+                                                    Height="50"
+                                                    Margin="10,4"
+                                                    Background="#ffd308"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="2"
+                                                    CornerRadius="8"
+                                                    MouseUp="BtnHighlighterColorYellow_Click">
+                                                    <Viewbox
+                                                        x:Name="BoardViewboxBtnHighlighterColorYellowContent"
+                                                        Margin="4"
+                                                        Visibility="Collapsed">
+                                                        <Image
+                                                            Width="24"
+                                                            Height="24"
+                                                            VerticalAlignment="Top"
+                                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                                            Source="/Resources/Icons-png/checked-white.png" />
+                                                    </Viewbox>
+                                                </Border>
+                                                <Border
+                                                    x:Name="BoardBorderHighlighterColorTeal"
+                                                    Width="60"
+                                                    Height="50"
+                                                    Margin="10,4"
+                                                    Background="#10baab"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="2"
+                                                    CornerRadius="8"
+                                                    MouseUp="BtnHighlighterColorTeal_Click">
+                                                    <Viewbox
+                                                        x:Name="BoardViewboxBtnHighlighterColorTealContent"
+                                                        Margin="4"
+                                                        Visibility="Collapsed">
+                                                        <Image
+                                                            Width="24"
+                                                            Height="24"
+                                                            VerticalAlignment="Top"
+                                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                                            Source="/Resources/Icons-png/checked-white.png" />
+                                                    </Viewbox>
+                                                </Border>
+                                                <Border
+                                                    x:Name="BoardBorderHighlighterColorBlue"
+                                                    Width="60"
+                                                    Height="50"
+                                                    Margin="10,4"
+                                                    Background="#4a76ff"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="2"
+                                                    CornerRadius="8"
+                                                    MouseUp="BtnHighlighterColorBlue_Click">
+                                                    <Viewbox
+                                                        x:Name="BoardViewboxBtnHighlighterColorBlueContent"
+                                                        Margin="4"
+                                                        Visibility="Collapsed">
+                                                        <Image
+                                                            Width="24"
+                                                            Height="24"
+                                                            VerticalAlignment="Top"
+                                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                                            Source="/Resources/Icons-png/checked-white.png" />
+                                                    </Viewbox>
+                                                </Border>
+                                                <Border
+                                                    x:Name="BoardBorderHighlighterColorPurple"
+                                                    Width="60"
+                                                    Height="50"
+                                                    Margin="10,4"
+                                                    Background="#9333ea"
+                                                    BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                                    BorderThickness="2"
+                                                    CornerRadius="8"
+                                                    MouseUp="BtnHighlighterColorPurple_Click">
+                                                    <Viewbox
+                                                        x:Name="BoardViewboxBtnHighlighterColorPurpleContent"
+                                                        Margin="4"
+                                                        Visibility="Collapsed">
+                                                        <Image
+                                                            Width="24"
+                                                            Height="24"
+                                                            VerticalAlignment="Top"
+                                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                                            Source="/Resources/Icons-png/checked-white.png" />
+                                                    </Viewbox>
+                                                </Border>
+                                            </Controls:UniformGrid>
+                                        </ikw:SimpleStackPanel>
+                                    </TabItem>
+                                </TabControl>
+                            </Border>
+                        </Popup>
+                        <Button
+                            Width="60"
+                            Height="55"
+                            Padding="0"
+                            BorderThickness="0"
+                            Click="BoardEraserIcon_Click">
+                            <Border
+                                x:Name="BoardEraser"
+                                Width="60"
+                                Height="55"
+                                Background="{DynamicResource BoardBarBackground}"
+                                BorderBrush="{DynamicResource BoardBarBorderBrush}"
+                                BorderThickness="0,1,0.25,1">
+                                <Grid Margin="5">
+                                    <ikw:SimpleStackPanel
+                                        Width="28"
+                                        Height="28"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Top"
+                                        Background="Transparent"
+                                        Orientation="Horizontal">
+                                        <ui:FontIcon
+                                            Width="28"
+                                            Height="22"
+                                            FontFamily="{StaticResource FluentIconFontFamily}"
+                                            FontSize="22"
+                                            Foreground="{DynamicResource BoardBarForeground}"
+                                            Glyph="&#xe75c;" />
+                                    </ikw:SimpleStackPanel>
+                                    <TextBlock
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Bottom"
+                                        FontSize="12"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Text="橡皮" />
+                                </Grid>
+                            </Border>
+                        </Button>
+                        <!-- 橡皮选项弹窗（照 PDF InkToolBar EraserPalette 一模一样复制：Pivot 面积擦/墨迹擦 → 粗细滑块 →
+                             滑动清空滑块；打开时只套画板栏缩放档 _boardBarScale，不套 PDF 的 0.65） -->
+                        <Popup x:Name="BoardEraserPalette"
+                            Placement="Custom"
+                            AllowsTransparency="True"
+                            StaysOpen="True"
+                            IsOpen="False"
+                            PopupAnimation="None">
+                            <Border x:Name="BoardEraserPaletteRoot"
+                                MinWidth="250"
+                                Background="{DynamicResource FloatBarBackgroundWithoutOpacity}"
+                                BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                BorderThickness="2"
+                                CornerRadius="10">
+                                <Border.Resources>
+                                    <!--  紧凑 Pivot：与墨迹菜单同款字号资源键 + TabItemPivot 样式基类（须先于 TabControl 声明）  -->
+                                    <sys:Double x:Key="PivotHeaderItemFontSize">18</sys:Double>
+                                    <Style x:Key="BoardEraserPivotTabItem" TargetType="TabItem"
+                                        BasedOn="{StaticResource {x:Static ui:ThemeKeys.TabItemPivotStyleKey}}">
+                                        <Setter Property="Height" Value="36" />
+                                    </Style>
+                                    <!--  滑动清空滑块：红色圆形滑块模板（与 PDF 确认样式 1:1）  -->
+                                    <ControlTemplate x:Key="BoardClearInkThumbTemplate" TargetType="Thumb">
+                                        <Border Background="#E8463A" CornerRadius="20">
+                                            <ic:FluentIcon Width="16" Height="16"
+                                                HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                Foreground="#FFFFFF"
+                                                Icon="ArrowRight"
+                                                IconSize="Resizable"
+                                                IconVariant="Regular" />
+                                        </Border>
+                                    </ControlTemplate>
+                                </Border.Resources>
+                                <ikw:SimpleStackPanel Margin="12,2,12,12" Spacing="8">
+                                    <TabControl x:Name="BoardPivotEraser"
+                                        Style="{StaticResource TabControlPivotStyle}"
+                                        ItemContainerStyle="{StaticResource BoardEraserPivotTabItem}"
+                                        SelectionChanged="BoardPivotEraser_SelectionChanged">
+                                        <TabItem Header="面积擦">
+                                            <ikw:SimpleStackPanel Margin="0,4,0,4" Spacing="8">
+                                                <!--  面积擦提示（照 PDF InkToolBar 同款：单行 4+4，Font 14 居中）  -->
+                                                <TextBlock FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource FloatBarForeground}" Text="覆盖笔画，区域擦除" />
+                                                <!--  手掌擦除 + 笔尖模式（照 PDF InkToolBar 同款开关行；两页签各一份，靠处理器互同步）  -->
+                                                <ikw:SimpleStackPanel HorizontalAlignment="Center" Orientation="Horizontal" VerticalAlignment="Center" Spacing="4">
+                                                    <TextBlock FontSize="14" VerticalAlignment="Center" Foreground="{DynamicResource FloatBarForeground}" Text="手掌擦除" />
+                                                    <ui:ToggleSwitch x:Name="BoardToggleSwitchPalmEraseArea"
+                                                        MinWidth="0"
+                                                        OffContent=""
+                                                        OnContent=""
+                                                        Toggled="BoardToggleSwitchPalmErase_Toggled" />
+                                                    <TextBlock Margin="10,0,0,0" FontSize="14" VerticalAlignment="Center" Foreground="{DynamicResource FloatBarForeground}" Text="笔尖模式" />
+                                                    <ui:ToggleSwitch x:Name="BoardToggleSwitchNibModeArea"
+                                                        MinWidth="0"
+                                                        IsEnabled="False"
+                                                        OffContent=""
+                                                        OnContent=""
+                                                        Toggled="BoardToggleSwitchNibMode_Toggled" />
+                                                </ikw:SimpleStackPanel>
+                                                <!--  粗细行（照 InkWidthSliderHard 三列 Grid；范围 1-20 对齐设置页，实际 EraserSize=值×4）  -->
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock FontSize="14" VerticalAlignment="Center" Foreground="{DynamicResource FloatBarForeground}" Text="粗细" />
+                                                    <Slider x:Name="BoardEraserSizeSlider"
+                                                        Grid.Column="1"
+                                                        Margin="10,0,0,0"
+                                                        IsSnapToTickEnabled="True"
+                                                        Maximum="20"
+                                                        Minimum="1"
+                                                        TickFrequency="1"
+                                                        TickPlacement="None"
+                                                        Value="10"
+                                                        ValueChanged="BoardEraserSizeSlider_ValueChanged"
+                                                        VerticalAlignment="Center" />
+                                                    <TextBlock Grid.Column="2" Margin="10,0,0,0" VerticalAlignment="Center" FontSize="14" Foreground="{DynamicResource FloatBarForeground}" Text="{Binding Value, ElementName=BoardEraserSizeSlider, Mode=OneWay}" />
+                                                </Grid>
+                                            </ikw:SimpleStackPanel>
+                                        </TabItem>
+                                        <TabItem Header="墨迹擦">
+                                            <ikw:SimpleStackPanel Margin="0,4,0,4" Spacing="8">
+                                                <TextBlock FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource FloatBarForeground}" Text="划过笔画，整笔擦除" />
+                                                <!--  手掌擦除 + 笔尖模式（与面积擦页签同款同处理器，靠重入守卫互同步）  -->
+                                                <ikw:SimpleStackPanel HorizontalAlignment="Center" Orientation="Horizontal" VerticalAlignment="Center" Spacing="4">
+                                                    <TextBlock FontSize="14" VerticalAlignment="Center" Foreground="{DynamicResource FloatBarForeground}" Text="手掌擦除" />
+                                                    <ui:ToggleSwitch x:Name="BoardToggleSwitchPalmEraseStroke"
+                                                        MinWidth="0"
+                                                        OffContent=""
+                                                        OnContent=""
+                                                        Toggled="BoardToggleSwitchPalmErase_Toggled" />
+                                                    <TextBlock Margin="10,0,0,0" FontSize="14" VerticalAlignment="Center" Foreground="{DynamicResource FloatBarForeground}" Text="笔尖模式" />
+                                                    <ui:ToggleSwitch x:Name="BoardToggleSwitchNibModeStroke"
+                                                        MinWidth="0"
+                                                        IsEnabled="False"
+                                                        OffContent=""
+                                                        OnContent=""
+                                                        Toggled="BoardToggleSwitchNibMode_Toggled" />
+                                                </ikw:SimpleStackPanel>
+                                            </ikw:SimpleStackPanel>
+                                        </TabItem>
+                                    </TabControl>
+                                    <!--  滑动清空滑块（与 PDF 确认样式 1:1：轨道160×48 圆角24、滑块40 红#E8463A 左缘4、文字左对齐 64=44+20、
+                                         拖动即隐藏文字、滑到底松手清空当前画板后直接回左）  -->
+                                    <Border x:Name="BoardClearInkTrack"
+                                        Width="160"
+                                        Height="48"
+                                        HorizontalAlignment="Center"
+                                        Background="{DynamicResource FloatBarBackgroundWithoutOpacity}"
+                                        BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                        BorderThickness="1"
+                                        ClipToBounds="True"
+                                        CornerRadius="24">
+                                        <Grid>
+                                            <TextBlock x:Name="BoardClearInkLabel"
+                                                Margin="64,0,0,0"
+                                                HorizontalAlignment="Left"
+                                                VerticalAlignment="Center"
+                                                FontSize="14"
+                                                Foreground="{DynamicResource FloatBarForeground}"
+                                                Text="清空墨迹" />
+                                            <Thumb x:Name="BoardClearInkThumb"
+                                                Width="40"
+                                                Height="40"
+                                                Margin="4,4,0,4"
+                                                HorizontalAlignment="Left"
+                                                VerticalAlignment="Center"
+                                                Focusable="True"
+                                                DragCompleted="BoardClearInkThumb_DragCompleted"
+                                                DragDelta="BoardClearInkThumb_DragDelta"
+                                                DragStarted="BoardClearInkThumb_DragStarted"
+                                                KeyDown="BoardClearInkThumb_KeyDown"
+                                                Template="{StaticResource BoardClearInkThumbTemplate}" />
+                                        </Grid>
+                                    </Border>
+                                </ikw:SimpleStackPanel>
+                            </Border>
+                        </Popup>
+                        <Border Width="0" />
+                        <Button
+                            Width="60"
+                            Height="55"
+                            Padding="0"
+                            BorderThickness="0"
+                            Click="BoardDrawShape_Click">
+                            <Border
+                                x:Name="BoardDrawShape"
+                                Width="60"
+                                Height="55"
+                                Background="{DynamicResource BoardBarBackground}"
+                                BorderBrush="{DynamicResource BoardBarBorderBrush}"
+                                BorderThickness="0,1,0.25,1">
+                                <Grid Margin="5">
+                                    <ikw:SimpleStackPanel
+                                        Width="28"
+                                        Height="28"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Top"
+                                        Background="Transparent"
+                                        Orientation="Horizontal">
+                                        <ui:FontIcon
+                                            Width="28"
+                                            Height="22"
+                                            FontFamily="{StaticResource FluentIconFontFamily}"
+                                            FontSize="22"
+                                            Foreground="{DynamicResource BoardBarForeground}"
+                                            Glyph="&#xf158;" />
+                                    </ikw:SimpleStackPanel>
+                                    <TextBlock
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Bottom"
+                                        FontSize="12"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Text="图形" />
+                                </Grid>
+                            </Border>
+                        </Button>
+                        <!-- 图形面板 Popup（照抄 PDF ShapePalette：Custom 放置于图形按钮正上方 8px） -->
+                        <Popup
+                            x:Name="BoardShapePalette"
+                            Placement="Custom"
+                            AllowsTransparency="True"
+                            StaysOpen="True"
+                            IsOpen="False"
+                            PopupAnimation="None">
+                            <Border
+                                x:Name="BoardBorderDrawShape"
+                                Background="{DynamicResource FloatBarBackgroundWithoutOpacity}"
+                                BorderBrush="{DynamicResource FloatBarBorderBrush}"
+                                BorderThickness="2"
+                                CornerRadius="10">
+                                <ikw:SimpleStackPanel Orientation="Vertical">
+                                    <Grid Margin="14,8,10,2">
+                                        <TextBlock
+                                            x:Name="BoardShapeHintTextBlock"
+                                            FontSize="10"
+                                            FontWeight="Bold"
+                                            Foreground="#666666"
+                                            VerticalAlignment="Center"
+                                            Text="支持长按保持选中" />
+                                        <ui:FontIcon
+                                            x:Name="BoardBorderDrawShapePin"
+                                            Width="16"
+                                            Height="16"
+                                            HorizontalAlignment="Right"
+                                            FontFamily="{StaticResource FluentIconFontFamily}"
+                                            FontSize="16"
+                                            Foreground="{DynamicResource FloatBarForeground}"
+                                            Glyph="&#xe77a;"
+                                            MouseDown="Border_MouseDown"
+                                            MouseUp="SymbolIconPinBorderDrawShape_MouseUp" />
+                                    </Grid>
+                                    <!-- 5×5 宫格：逐字复制 PDF InkToolBar（每图形项等大单元格，末格留空） -->
+                                    <UniformGrid Rows="5" Columns="5" Width="225" Height="225" Margin="10,6,10,10">
+                                        <Border Tag="1" CornerRadius="5" Background="Transparent" Margin="6" Padding="2">
+                                            <Image x:Name="ImageDrawLine"
+                                                MouseDown="Image_MouseDown"
+                                                MouseUp="Image_MouseUp"
+                                                Source="{DynamicResource DrawShapeImageSource.Line}" />
+                                        </Border>
+                                        <Border Tag="8" CornerRadius="5" Background="Transparent" Margin="6" Padding="2">
+                                            <Image x:Name="ImageDrawDashedLine"
+                                                MouseDown="Image_MouseDown"
+                                                MouseUp="Image_MouseUp"
+                                                Source="{DynamicResource DrawShapeImageSource.DashedLine}" />
+                                        </Border>
+                                        <Border Tag="18" CornerRadius="5" Background="Transparent" Margin="6" Padding="2">
+                                            <Image x:Name="ImageDrawDotLine"
+                                                MouseDown="Image_MouseDown"
+                                                MouseUp="Image_MouseUp"
+                                                Source="{DynamicResource DrawShapeImageSource.DotLine}" />
+                                        </Border>
+                                        <Border Tag="2" CornerRadius="5" Background="Transparent" Margin="6" Padding="2">
+                                            <Image x:Name="ImageDrawArrow"
+                                                MouseDown="Image_MouseDown"
+                                                MouseUp="Image_MouseUp"
+                                                Source="{DynamicResource DrawShapeImageSource.ArrowLine}" />
+                                        </Border>
+                                        <Border Tag="15" CornerRadius="5" Background="Transparent" Margin="6" Padding="2">
+                                            <Image x:Name="ImageDrawParallelLine"
+                                                MouseDown="Image_MouseDown"
+                                                MouseUp="Image_MouseUp"
+                                                Source="{DynamicResource DrawShapeImageSource.ParallelLine}" />
+                                        </Border>
+                                        <Border Tag="11" CornerRadius="5" Background="Transparent" Margin="6" Padding="2">
+                                            <Image MouseDown="Image_MouseDown" MouseUp="Image_MouseUp" Source="{DynamicResource DrawShapeImageSource.Coordinate1}" />
+                                        </Border>
+                                        <Border Tag="12" CornerRadius="5" Background="Transparent" Margin="6" Padding="2">
+                                            <Image MouseDown="Image_MouseDown" MouseUp="Image_MouseUp" Source="{DynamicResource DrawShapeImageSource.Coordinate2}" />
+                                        </Border>
+                                        <Border Tag="13" CornerRadius="5" Background="Transparent" Margin="6" Padding="2">
+                                            <Image MouseDown="Image_MouseDown" MouseUp="Image_MouseUp" Source="{DynamicResource DrawShapeImageSource.Coordinate3}" />
+                                        </Border>
+                                        <Border Tag="14" CornerRadius="5" Background="Transparent" Margin="6" Padding="2">
+                                            <Image MouseDown="Image_MouseDown" MouseUp="Image_MouseUp" Source="{DynamicResource DrawShapeImageSource.Coordinate4}" />
+                                        </Border>
+                                        <Border Tag="17" CornerRadius="5" Background="Transparent" Margin="6" Padding="2">
+                                            <Image MouseDown="Image_MouseDown" MouseUp="Image_MouseUp" Source="{DynamicResource DrawShapeImageSource.Coordinate5}" />
+                                        </Border>
+                                        <Border Tag="19" CornerRadius="5" Background="Transparent" Margin="6" Padding="2">
+                                            <Image MouseDown="Image_MouseDown" MouseUp="Image_MouseUp" Source="{DynamicResource DrawShapeImageSource.RectangleCenter}" />
+                                        </Border>
+                                        <Border Tag="5" CornerRadius="5" Background="Transparent" Margin="6" Padding="2">
+                                            <Image MouseDown="Image_MouseDown" MouseUp="Image_MouseUp" Source="{DynamicResource DrawShapeImageSource.Circle}" />
+                                        </Border>
+                                        <Border Tag="10" CornerRadius="5" Background="Transparent" Margin="6" Padding="2">
+                                            <Image MouseDown="Image_MouseDown" MouseUp="Image_MouseUp" Source="{DynamicResource DrawShapeImageSource.DashedCircle}" />
+                                        </Border>
+                                        <Border Tag="16" CornerRadius="5" Background="Transparent" Margin="6" Padding="2">
+                                            <Image MouseDown="Image_MouseDown" MouseUp="Image_MouseUp" Source="{DynamicResource DrawShapeImageSource.EllipseCenter}" />
+                                        </Border>
+                                        <Border Tag="23" CornerRadius="5" Background="Transparent" Margin="6" Padding="2">
+                                            <Image MouseDown="Image_MouseDown" MouseUp="Image_MouseUp" Source="{DynamicResource DrawShapeImageSource.EllipseCenterWithFocalPoint}" />
+                                        </Border>
+                                        <Border Tag="24" CornerRadius="5" Background="Transparent" Margin="6" Padding="2">
+                                            <Image MouseDown="Image_MouseDown" MouseUp="Image_MouseUp" Source="{DynamicResource DrawShapeImageSource.Hyperbola}" />
+                                        </Border>
+                                        <Border Tag="25" CornerRadius="5" Background="Transparent" Margin="6" Padding="2">
+                                            <Image MouseDown="Image_MouseDown" MouseUp="Image_MouseUp" Source="{DynamicResource DrawShapeImageSource.HyperbolaWithFocalPoint}" />
+                                        </Border>
+                                        <Border Tag="20" CornerRadius="5" Background="Transparent" Margin="6" Padding="2">
+                                            <Image MouseDown="Image_MouseDown" MouseUp="Image_MouseUp" Source="{DynamicResource DrawShapeImageSource.Parabola}" />
+                                        </Border>
+                                        <Border Tag="22" CornerRadius="5" Background="Transparent" Margin="6" Padding="2">
+                                            <Image
+                                                MouseDown="Image_MouseDown"
+                                                MouseUp="Image_MouseUp"
+                                                RenderTransformOrigin="0.5,0.5"
+                                                Source="{DynamicResource DrawShapeImageSource.ParabolaWithFocalPoint}">
+                                                <Image.RenderTransform>
+                                                    <TransformGroup>
+                                                        <ScaleTransform />
+                                                        <SkewTransform />
+                                                        <RotateTransform Angle="90" />
+                                                        <TranslateTransform />
+                                                    </TransformGroup>
+                                                </Image.RenderTransform>
+                                            </Image>
+                                        </Border>
+                                        <Border Tag="21" CornerRadius="5" Background="Transparent" Margin="6" Padding="2">
+                                            <Image
+                                                MouseDown="Image_MouseDown"
+                                                MouseUp="Image_MouseUp"
+                                                RenderTransformOrigin="0.5,0.5"
+                                                Source="{DynamicResource DrawShapeImageSource.Parabola2}">
+                                                <Image.RenderTransform>
+                                                    <TransformGroup>
+                                                        <ScaleTransform />
+                                                        <SkewTransform />
+                                                        <RotateTransform Angle="90" />
+                                                        <TranslateTransform />
+                                                    </TransformGroup>
+                                                </Image.RenderTransform>
+                                            </Image>
+                                        </Border>
+                                        <Border Tag="3" CornerRadius="5" Background="Transparent" Margin="6" Padding="2">
+                                            <Image MouseDown="Image_MouseDown" MouseUp="Image_MouseUp" Source="{DynamicResource DrawShapeImageSource.Rectangle}" />
+                                        </Border>
+                                        <Border Tag="6" CornerRadius="5" Background="Transparent" Margin="6" Padding="2">
+                                            <Image MouseDown="Image_MouseDown" MouseUp="Image_MouseUp" Source="{DynamicResource DrawShapeImageSource.Cylinder}" />
+                                        </Border>
+                                        <Border Tag="7" CornerRadius="5" Background="Transparent" Margin="6" Padding="2">
+                                            <Image MouseDown="Image_MouseDown" MouseUp="Image_MouseUp" Source="{DynamicResource DrawShapeImageSource.Cone}" />
+                                        </Border>
+                                        <Border Tag="9" CornerRadius="5" Background="Transparent" Margin="6" Padding="2">
+                                            <Image MouseDown="Image_MouseDown" MouseUp="Image_MouseUp" Source="{DynamicResource DrawShapeImageSource.Cuboid}" />
+                                        </Border>
+                                    </UniformGrid>
+                                </ikw:SimpleStackPanel>
+                            </Border>
+                        </Popup>
+                        <Button
+                            Width="60"
+                            Height="55"
+                            Padding="0"
+                            BorderThickness="0"
+                            Click="SymbolIconUndo_Click">
+                            <Border
+                                x:Name="BoardUndo"
+                                Width="60"
+                                Height="55"
+                                Background="{DynamicResource BoardBarBackground}"
+                                BorderBrush="{DynamicResource BoardBarBorderBrush}"
+                                BorderThickness="0,1,0.25,1">
+                                <Grid Margin="5">
+                                    <ikw:SimpleStackPanel
+                                        Width="28"
+                                        Height="28"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Top"
+                                        Background="Transparent"
+                                        Orientation="Horizontal">
+                                        <ui:FontIcon
+                                            Width="28"
+                                            Height="22"
+                                            FontFamily="{StaticResource FluentIconFontFamily}"
+                                            FontSize="22"
+                                            Foreground="{DynamicResource BoardBarForeground}"
+                                            Glyph="" />
+                                    </ikw:SimpleStackPanel>
+                                    <TextBlock
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Bottom"
+                                        FontSize="12"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Text="撤销" />
+                                </Grid>
+                            </Border>
+                        </Button>
+                        <Button
+                            Width="60"
+                            Height="55"
+                            Padding="0"
+                            BorderThickness="0"
+                            Click="SymbolIconRedo_Click">
+                            <Border
+                                x:Name="BoardRedo"
+                                Width="60"
+                                Height="55"
+                                Background="{DynamicResource BoardBarBackground}"
+                                BorderBrush="{DynamicResource BoardBarBorderBrush}"
+                                BorderThickness="0,1,1,1"
+                                CornerRadius="0,5,5,0">
+                                <Grid Margin="5">
+                                    <ikw:SimpleStackPanel
+                                        Width="28"
+                                        Height="28"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Top"
+                                        Background="Transparent"
+                                        Orientation="Horizontal">
+                                        <ui:FontIcon
+                                            Width="28"
+                                            Height="22"
+                                            FontFamily="{StaticResource FluentIconFontFamily}"
+                                            FontSize="22"
+                                            Foreground="{DynamicResource BoardBarForeground}"
+                                            Glyph="" />
+                                    </ikw:SimpleStackPanel>
+                                    <TextBlock
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Bottom"
+                                        FontSize="12"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Text="重做" />
+                                </Grid>
+                            </Border>
+                        </Button>
+                    </ikw:SimpleStackPanel>
+                </Grid>
+            </Viewbox>
+            <!--  右下角  -->
+            <Viewbox
+                x:Name="ViewboxBlackboardRightSide"
+                Height="55"
+                Margin="3,0,0,0"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Bottom">
+                <Viewbox.LayoutTransform>
+                    <ScaleTransform x:Name="ViewboxBlackboardRightSideScaleTransform" ScaleX="1" ScaleY="1" />
+                </Viewbox.LayoutTransform>
+                <Grid
+                    x:Name="BlackboardRightSide"
+                    Height="55"
+                    Margin="0,0,3,0"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Bottom"
+                    Visibility="Visible">
+                    <Grid.Resources>
+                        <!--  定义 SolidColorBrush 资源  -->
+                        <SolidColorBrush x:Key="{x:Static ui:ThemeKeys.ButtonBackgroundKey}" Color="{DynamicResource BoardBarButtonBackgroundKey}" />
+                        <SolidColorBrush x:Key="{x:Static ui:ThemeKeys.ButtonBackgroundPointerOverKey}" Color="{DynamicResource BoardBarButtonBackgroundPointerOverKey}" />
+                        <SolidColorBrush x:Key="{x:Static ui:ThemeKeys.ButtonBackgroundPressedKey}" Color="{DynamicResource BoardBarButtonButtonBackgroundPressedKey}" />
+                        <!--  定义按钮样式  -->
+                        <Style TargetType="Button">
+                            <Setter Property="Background" Value="{StaticResource {x:Static ui:ThemeKeys.ButtonBackgroundKey}}" />
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border
+                                            Background="{TemplateBinding Background}"
+                                            BorderBrush="{TemplateBinding BorderBrush}"
+                                            BorderThickness="{TemplateBinding BorderThickness}"
+                                            CornerRadius="5">
+                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter Property="Background" Value="{StaticResource {x:Static ui:ThemeKeys.ButtonBackgroundPointerOverKey}}" />
+                                            </Trigger>
+                                            <Trigger Property="IsPressed" Value="True">
+                                                <Setter Property="Background" Value="{StaticResource {x:Static ui:ThemeKeys.ButtonBackgroundPressedKey}}" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </Grid.Resources>
+                    <ikw:SimpleStackPanel x:Name="BlackboardRightBarPanel" Orientation="Horizontal">
+                        <Button
+                            Width="55"
+                            Height="55"
+                            Margin="0,0,5,0"
+                            Padding="0"
+                            BorderThickness="0"
+                            Click="BtnWhiteBoardAdd_Click">
+                            <Border
+                                Width="55"
+                                Height="55"
+                                Background="{DynamicResource BoardBarBackground}"
+                                BorderBrush="{DynamicResource BoardBarBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="3">
+                                <Grid Margin="5">
+                                    <!--  居中微调：加页图标在本按钮内左偏 2px（ICA 原生缺陷），用 4px 左外边距推回中心  -->
+                                    <ui:FontIcon
+                                        x:Name="BtnBoardAddPage"
+                                        Width="26"
+                                        Height="26"
+                                        Margin="4,0,0,0"
+                                        VerticalAlignment="Top"
+                                        FontFamily="{StaticResource FluentIconFontFamily}"
+                                        FontSize="24"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Glyph=""
+                                        IsEnabled="True"
+                                        IsEnabledChanged="Element_IsEnabledChanged" />
+                                    <TextBlock
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Bottom"
+                                        FontSize="12"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Opacity="{Binding ElementName=BtnBoardAddPage, Path=Opacity}"
+                                        Text="加页" />
+                                </Grid>
+                            </Border>
+                        </Button>
+                        <Button
+                            Width="60"
+                            Height="55"
+                            Padding="0"
+                            BorderThickness="0"
+                            Click="BtnWhiteBoardSwitchPrevious_Click"
+                            IsEnabled="{Binding ElementName=BtnWhiteBoardSwitchPrevious, Path=IsEnabled}"
+                            Opacity="{Binding ElementName=BtnWhiteBoardSwitchPrevious, Path=Opacity}">
+                            <Border
+                                Width="60"
+                                Height="55"
+                                Background="{DynamicResource BoardBarBackground}"
+                                BorderBrush="{DynamicResource BoardBarBorderBrush}"
+                                BorderThickness="1,1,0.25,1"
+                                CornerRadius="3,0,0,3">
+                                <Grid Margin="5">
+                                    <ui:FontIcon
+                                        Width="26"
+                                        Height="26"
+                                        VerticalAlignment="Top"
+                                        FontFamily="{StaticResource FluentIconFontFamily}"
+                                        FontSize="24"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Glyph="" />
+                                    <TextBlock
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Bottom"
+                                        FontSize="12"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Text="上一页" />
+                                </Grid>
+                            </Border>
+                        </Button>
+                        <Border
+                            Width="58"
+                            Height="55"
+                            Background="{DynamicResource BoardBarBackground}"
+                            BorderBrush="{DynamicResource BoardBarBorderBrush}"
+                            BorderThickness="0,1,0.25,1">
+                            <Grid Margin="0,5">
+                                <ikw:SimpleStackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <TextBlock
+                                        Margin="0,4,0,2"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        FontSize="15"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Text="{Binding ElementName=TextBlockWhiteBoardIndexInfo, Path=Text}" />
+                                    <TextBlock
+                                        Margin="0,3,0,0"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        FontSize="12"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Text="页码" />
+                                </ikw:SimpleStackPanel>
+                            </Grid>
+                        </Border>
+                        <Button
+                            Width="60"
+                            Height="55"
+                            Padding="0"
+                            BorderThickness="0"
+                            Click="BtnWhiteBoardSwitchNext_Click">
+                            <Border
+                                Width="60"
+                                Height="55"
+                                Background="{DynamicResource BoardBarBackground}"
+                                BorderBrush="{DynamicResource BoardBarBorderBrush}"
+                                BorderThickness="0,1,1,1"
+                                CornerRadius="0,5,5,0">
+                                <Grid Margin="5">
+                                    <ui:FontIcon
+                                        Width="{Binding ElementName=BoardLeftPannelNextPage1, Path=Width}"
+                                        Height="26"
+                                        VerticalAlignment="Top"
+                                        FontFamily="{StaticResource FluentIconFontFamily}"
+                                        FontSize="24"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Glyph=""
+                                        Opacity="{Binding ElementName=BoardLeftPannelNextPage1, Path=Opacity}" />
+                                    <ui:FontIcon
+                                        Width="{Binding ElementName=BoardLeftPannelNextPage2, Path=Width}"
+                                        Height="26"
+                                        VerticalAlignment="Top"
+                                        FontFamily="{StaticResource FluentIconFontFamily}"
+                                        FontSize="24"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Glyph=""
+                                        Opacity="{Binding ElementName=BoardLeftPannelNextPage1, Path=Opacity}" />
+                                    <TextBlock
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Bottom"
+                                        FontSize="12"
+                                        Foreground="{DynamicResource BoardBarForeground}"
+                                        Opacity="{Binding ElementName=BoardLeftPannelNextPage1, Path=Opacity}"
+                                        Text="{Binding ElementName=BoardLeftPannelNextPageTextBlock, Path=Text}" />
+                                </Grid>
+                            </Border>
+                        </Button>
+                    </ikw:SimpleStackPanel>
+                </Grid>
+            </Viewbox>
+        </Grid>
+        <!--  形状面板自动隐藏开关（ICA 浮动栏元素，画板代码引用，常开且隐藏）  -->
+        <ui:ToggleSwitch
+            x:Name="ToggleSwitchDrawShapeBorderAutoHide"
+            IsOn="True"
+            Visibility="Collapsed" />
+        <Border x:Name="BtnPPTSlideShowEnd" Visibility="Collapsed" />
+        <Grid x:Name="GridNotifications" Visibility="Collapsed" />
+    </Grid>
+</UserControl>

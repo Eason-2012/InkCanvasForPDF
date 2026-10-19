@@ -1,0 +1,169 @@
+[
+  {
+    "RepositoryId": "Ink-Canvas-Artistry",
+    "RepositoryVersion": "4.9.4",
+    "RepositoryProjectUrl": "https://github.com/InkCanvas/Ink-Canvas-Artistry",
+    "Copyright": "Copyright WuChanging 2023",
+    "Authors": "WuChanging",
+    "Description": "A fantastic Ink Canvas in WPF/C#, based on WXRIW/Ink-Canvas.",
+    "License": "GPL-3.0 license",
+    "LicenseUrl": "https://github.com/InkCanvas/Ink-Canvas-Artistry?tab=GPL-3.0-1-ov-file",
+
+  },
+  {
+    "RepositoryId": "KillerPDF",
+    "RepositoryVersion": "1.8.4",
+    "RepositoryProjectUrl": "https://github.com/SteveTheKiller/KillerPDF",
+    "Copyright": "Copyright SteveTheKiller 2026",
+    "Authors": "SteveTheKiller",
+    "Description": "Free and open-source PDF editor for Windows with a built-in PDF 2.0 engine. View, annotate, OCR, merge, split, crop, rotate, compare, edit text, draw, sign, fill forms, print, flatten, and open password-protected PDFs without a subscription.",
+    "License": "GPL-3.0 license",
+    "LicenseUrl": "https://github.com/SteveTheKiller/KillerPDF?tab=GPL-3.0-1-ov-file",
+
+  },
+  {
+    "PackageId": "Carrot.UI.ColorPicker",
+    "PackageVersion": "0.2.1",
+    "PackageProjectUrl": "https://github.com/mcxiaoke/Carrot.UI",
+    "Copyright": "Copyright \u00A9 CatCastle 2022",
+    "Authors": "CatCastle",
+    "Description": "Carrot UI Color Picker",
+    "License": "Apache-2.0",
+    "LicenseUrl": "https://licenses.nuget.org/Apache-2.0",
+    "LicenseInformationOrigin": 0
+  },
+  {
+    "PackageId": "Docnet.Core",
+    "PackageVersion": "2.6.0",
+    "PackageProjectUrl": "https://github.com/GowenGit/docnet",
+    "Copyright": "MIT",
+    "Authors": "Modestas Petravicius",
+    "Description": "DocNET is a fast PDF editing and reading library for modern .NET applications.",
+    "License": "MIT",
+    "LicenseUrl": "https://licenses.nuget.org/MIT",
+    "LicenseInformationOrigin": 0
+  },
+  {
+    "PackageId": "FluentIcons.Common",
+    "PackageVersion": "1.1.312",
+    "Authors": "davidxuang",
+    "Description": "A shared library for FluentUI System Icons control library.",
+    "License": "MIT",
+    "LicenseUrl": "https://licenses.nuget.org/MIT",
+    "LicenseInformationOrigin": 0
+  },
+  {
+    "PackageId": "FluentIcons.Wpf",
+    "PackageVersion": "1.1.312",
+    "Authors": "davidxuang",
+    "Description": "FluentUI System Icons control library for WPF.",
+    "License": "MIT",
+    "LicenseUrl": "https://licenses.nuget.org/MIT",
+    "LicenseInformationOrigin": 0
+  },
+  {
+    "PackageId": "iNKORE.UI.WPF",
+    "PackageVersion": "1.2.8",
+    "Authors": "Yoojun Zhou",
+    "Description": "Some frequently-used modules and helpers for your WPF applications",
+    "License": "LGPL-2.1-or-later",
+    "LicenseUrl": "https://licenses.nuget.org/LGPL-2.1-or-later",
+    "LicenseInformationOrigin": 0
+  },
+  {
+    "PackageId": "iNKORE.UI.WPF.Modern",
+    "PackageVersion": "0.10.2",
+    "PackageProjectUrl": "https://docs.inkore.net/ui-wpf-modern",
+    "Copyright": "Copyright \u00A9 iNKORE! (iNKORE Studios) 2025. All rights reserved.",
+    "Authors": "Yoojun Zhou",
+    "Description": "Modern (Fluent 2) styles and controls for your WPF applications.",
+    "License": "https://github.com/iNKORE-NET/UI.WPF.Modern/blob/main/LICENSE",
+    "LicenseUrl": "https://github.com/iNKORE-NET/UI.WPF.Modern/blob/main/LICENSE",
+    "LicenseInformationOrigin": 1
+  },
+  {
+    "PackageId": "Microsoft.Data.Sqlite",
+    "PackageVersion": "10.0.13",
+    "PackageProjectUrl": "https://docs.microsoft.com/dotnet/standard/data/sqlite/",
+    "Copyright": "\u00A9 Microsoft Corporation. All rights reserved.",
+    "Authors": "Microsoft",
+    "Description": "Microsoft.Data.Sqlite is a lightweight ADO.NET provider for SQLite.\n\nCommonly Used Types:\nMicrosoft.Data.Sqlite.SqliteCommand\nMicrosoft.Data.Sqlite.SqliteConnection\nMicrosoft.Data.Sqlite.SqliteConnectionStringBuilder\nMicrosoft.Data.Sqlite.SqliteDataReader\nMicrosoft.Data.Sqlite.SqliteException\nMicrosoft.Data.Sqlite.SqliteFactory\nMicrosoft.Data.Sqlite.SqliteParameter\nMicrosoft.Data.Sqlite.SqliteTransaction",
+    "License": "MIT",
+    "LicenseUrl": "https://licenses.nuget.org/MIT",
+    "LicenseInformationOrigin": 0
+  },
+  {
+    "PackageId": "Microsoft.Data.Sqlite.Core",
+    "PackageVersion": "10.0.13",
+    "PackageProjectUrl": "https://docs.microsoft.com/dotnet/standard/data/sqlite/",
+    "Copyright": "\u00A9 Microsoft Corporation. All rights reserved.",
+    "Authors": "Microsoft",
+    "Description": "Microsoft.Data.Sqlite is a lightweight ADO.NET provider for SQLite. This package does not include a copy of the native SQLite library.\n\nCommonly Used Types:\nMicrosoft.Data.Sqlite.SqliteCommand\nMicrosoft.Data.Sqlite.SqliteConnection\nMicrosoft.Data.Sqlite.SqliteConnectionStringBuilder\nMicrosoft.Data.Sqlite.SqliteDataReader\nMicrosoft.Data.Sqlite.SqliteException\nMicrosoft.Data.Sqlite.SqliteFactory\nMicrosoft.Data.Sqlite.SqliteParameter\nMicrosoft.Data.Sqlite.SqliteTransaction",
+    "License": "MIT",
+    "LicenseUrl": "https://licenses.nuget.org/MIT",
+    "LicenseInformationOrigin": 0
+  },
+  {
+    "PackageId": "Newtonsoft.Json",
+    "PackageVersion": "13.0.4",
+    "PackageProjectUrl": "https://www.newtonsoft.com/json",
+    "Copyright": "Copyright \u00A9 James Newton-King 2008",
+    "Authors": "James Newton-King",
+    "Description": "Json.NET is a popular high-performance JSON framework for .NET",
+    "License": "MIT",
+    "LicenseUrl": "https://licenses.nuget.org/MIT",
+    "LicenseInformationOrigin": 0
+  },
+  {
+    "PackageId": "SQLitePCLRaw.bundle_e_sqlite3",
+    "PackageVersion": "2.1.13",
+    "Copyright": "Copyright 2014-2024 SourceGear, LLC",
+    "Authors": "Eric Sink",
+    "Description": "This \u0027batteries-included\u0027 bundle brings in SQLitePCLRaw.core and the necessary stuff for certain common use cases.  Call SQLitePCL.Batteries.Init().  Policy of this bundle: e_sqlite3 included",
+    "License": "Apache-2.0",
+    "LicenseUrl": "https://licenses.nuget.org/Apache-2.0",
+    "LicenseInformationOrigin": 0
+  },
+  {
+    "PackageId": "SQLitePCLRaw.core",
+    "PackageVersion": "2.1.13",
+    "Copyright": "Copyright 2014-2024 SourceGear, LLC",
+    "Authors": "Eric Sink",
+    "Description": "SQLitePCL.raw is a Portable Class Library (PCL) for low-level (raw) access to SQLite.  This package does not provide an API which is friendly to app developers.  Rather, it provides an API which handles platform and configuration issues, upon which a friendlier API can be built.  In order to use this package, you will need to also add one of the SQLitePCLRaw.provider.* packages and call raw.SetProvider().  Convenience packages are named SQLitePCLRaw.bundle_*.",
+    "License": "Apache-2.0",
+    "LicenseUrl": "https://licenses.nuget.org/Apache-2.0",
+    "LicenseInformationOrigin": 0
+  },
+  {
+    "PackageId": "SQLitePCLRaw.lib.e_sqlite3",
+    "PackageVersion": "2.1.13",
+    "Copyright": "Copyright 2014-2024 SourceGear, LLC",
+    "Authors": "Eric Sink",
+    "Description": "This package contains platform-specific native code builds of SQLite for use with SQLitePCLRaw.  To use this, you need SQLitePCLRaw.core as well as one of the SQLitePCLRaw.provider.* packages.  Convenience packages are named SQLitePCLRaw.bundle_*.",
+    "Summary": "SQLitePCLRaw is a Portable Class Library (PCL) for low-level (raw) access to SQLite",
+    "License": "Apache-2.0",
+    "LicenseUrl": "https://licenses.nuget.org/Apache-2.0",
+    "LicenseInformationOrigin": 0
+  },
+  {
+    "PackageId": "SQLitePCLRaw.provider.e_sqlite3",
+    "PackageVersion": "2.1.13",
+    "Copyright": "Copyright 2014-2024 SourceGear, LLC",
+    "Authors": "Eric Sink",
+    "Description": "SQLitePCLRaw is a Portable Class Library (PCL) for low-level (raw) access to SQLite.  Packages named \u0027SQLitePCLRaw.provider.*\u0027 (like this one) are \u0027plugins\u0027 that allow SQLitePCLRaw.core to access the native SQLite library.  This provider does DllImport of \u0027e_sqlite3\u0027, the SQLite builds provided with SQLitePCLRaw.",
+    "License": "Apache-2.0",
+    "LicenseUrl": "https://licenses.nuget.org/Apache-2.0",
+    "LicenseInformationOrigin": 0
+  },
+  {
+    "PackageId": "System.IO.Hashing",
+    "PackageVersion": "10.0.13",
+    "PackageProjectUrl": "https://dot.net/",
+    "Copyright": "\u00A9 Microsoft Corporation. All rights reserved.",
+    "Authors": "Microsoft",
+    "Description": "Provides non-cryptographic hash algorithms, such as CRC-32.\n\nCommonly Used Types:\nSystem.IO.Hashing.Crc32\nSystem.IO.Hashing.XxHash32",
+    "License": "MIT",
+    "LicenseUrl": "https://licenses.nuget.org/MIT",
+    "LicenseInformationOrigin": 0
+  }
+]

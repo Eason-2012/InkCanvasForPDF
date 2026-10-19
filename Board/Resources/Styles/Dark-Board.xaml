@@ -1,0 +1,14 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:ui="http://schemas.inkore.net/lib/ui/wpf/modern">
+    <!-- 抄 ICA Resources/Styles/Dark-Board.xaml：黑板墨迹栏深色配色（BoardView.SetBoardTheme 原地替换 Light-Board.xaml） -->
+    <ui:ElementTheme x:Key="BoardTheme">Dark</ui:ElementTheme>
+    <!-- 栏体不透明：透明度统一由 ApplyBoardBarLayout 的三条 Grid Opacity 控制（画刷自带 0.75 会与设置叠加导致 100% 仍半透明） -->
+    <SolidColorBrush x:Key="BoardBarBackground" Color="Black" />
+    <SolidColorBrush x:Key="BoardBarTitleBackground" Opacity="0.5" Color="#2156c9" />
+    <SolidColorBrush x:Key="BoardBarBorderBrush" Opacity="0.6" Color="White" />
+    <SolidColorBrush x:Key="BoardBarForeground" Color="White" />
+    <Color x:Key="BoardBarForegroundColor">#FFcccccc</Color>
+
+    <Color x:Key="BoardBarButtonBackgroundKey">Transparent</Color>
+    <Color x:Key="BoardBarButtonBackgroundPointerOverKey">#3600CDCD</Color>
+    <Color x:Key="BoardBarButtonButtonBackgroundPressedKey">#5500CDCD</Color>
+</ResourceDictionary>

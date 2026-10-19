@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RuntimeIdentifiers>win-x64;win-x86;win-arm64</RuntimeIdentifiers>
+    <AssemblyName>InkCanvasForPDF</AssemblyName>
+    <RootNamespace>InkCanvasForPDF</RootNamespace>
+	<AssemblyVersion>0.20.0</AssemblyVersion>
+	<FileVersion>0.20.0</FileVersion>
+	<InformationalVersion>0.20.0-Dev</InformationalVersion>
+	<ApplicationIcon>Resources\app.ico</ApplicationIcon>
+	</PropertyGroup>
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Docnet.Core" Version="2.6.0" />
+    <PackageReference Include="FluentIcons.Wpf" Version="1.1.312" />
+    <PackageReference Include="iNKORE.UI.WPF.Modern" Version="0.10.2" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <PackageReference Include="Carrot.UI.ColorPicker" Version="0.2.1" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.13" />
+    <PackageReference Include="System.IO.Hashing" Version="10.0.13" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 墨迹工具栏资源（抄 Ink-Canvas：图标字体 + 激活态勾选背景/勾标） -->
+    <Resource Include="Resources\Segoe Fluent Icons.ttf" />
+    <Resource Include="Resources\Icons-png\check-box-background.png" />
+    <Resource Include="Resources\Icons-png\checked-white.png" />
+    <Resource Include="Resources\Icons-png\checked-black.png" />
+    <Resource Include="Resources\dependencies.g.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 应用图标（exe=ApplicationIcon；标题栏=Window.Icon 用 ico，多尺寸帧标题栏直接取 16px）
+         pdf.ico：文件关联图标（复制到输出目录，供用户手动设置关联时引用） -->
+    <Content Include="Resources\app.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Resources\pdf.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

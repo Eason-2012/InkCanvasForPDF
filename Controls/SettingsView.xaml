@@ -1,0 +1,714 @@
+<UserControl x:Class="InkCanvasForPDF.Controls.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ikw="http://schemas.inkore.net/lib/ui/wpf"
+             xmlns:ui="http://schemas.inkore.net/lib/ui/wpf/modern"
+             xmlns:ic="clr-namespace:FluentIcons.Wpf;assembly=FluentIcons.Wpf">
+
+    <UserControl.Resources>
+    </UserControl.Resources>
+
+    <!-- 根：不透明背景（跟随主题），整页盖住下方 PDF（设置页不再透出内容） -->
+    <Grid Background="{DynamicResource AppBackgroundBrush}">
+        <ui:NavigationView x:Name="SettingsNav"
+                           PaneDisplayMode="Left"
+                           IsSettingsVisible="False"
+                           IsBackButtonVisible="Auto"
+                           IsBackEnabled="True"
+                           BackRequested="SettingsNav_BackRequested"
+                           OpenPaneLength="240"
+                           SelectionChanged="SettingsNav_SelectionChanged">
+            <ui:NavigationView.MenuItems>
+                <!-- 墨迹书写 / 应用主题 / PDF阅读 / 画板书写 导航项（iNKORE Fluent 侧栏） -->
+                <ui:NavigationViewItem Content="墨迹书写" Tag="writing">
+                    <ui:NavigationViewItem.Icon>
+                        <ic:FluentIcon Icon="Signature" IconVariant="Regular" FontSize="20"/>
+                    </ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
+                <ui:NavigationViewItem Content="应用主题" Tag="appearance">
+                    <ui:NavigationViewItem.Icon>
+                        <ic:FluentIcon Icon="PaintBrush" IconVariant="Regular" FontSize="20"/>
+                    </ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
+                <ui:NavigationViewItem Content="PDF阅读" Tag="pdfbar">
+                    <ui:NavigationViewItem.Icon>
+                        <ic:FluentIcon Icon="DocumentPdf" IconVariant="Regular" FontSize="20"/>
+                    </ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
+                <ui:NavigationViewItem Content="画板书写" Tag="boardbar">
+                    <ui:NavigationViewItem.Icon>
+                        <ic:FluentIcon Icon="Whiteboard" IconVariant="Regular" FontSize="20"/>
+                    </ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
+                <ui:NavigationViewItem Content="墨迹纠正" Tag="inkrecog">
+                    <ui:NavigationViewItem.Icon>
+                        <ic:FluentIcon Icon="PenSparkle" IconVariant="Regular" FontSize="20"/>
+                    </ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
+                <ui:NavigationViewItem Content="手掌擦除" Tag="palmerase">
+                    <ui:NavigationViewItem.Icon>
+                        <ic:FluentIcon Icon="HandLeft" IconVariant="Regular" FontSize="20"/>
+                    </ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
+                <ui:NavigationViewItem Content="数据存储" Tag="datastorage">
+                    <ui:NavigationViewItem.Icon>
+                        <ic:FluentIcon Icon="Storage" IconVariant="Regular" FontSize="20"/>
+                    </ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
+                <ui:NavigationViewItem Content="应用更新" Tag="update">
+                    <ui:NavigationViewItem.Icon>
+                        <ic:FluentIcon Icon="ArrowSync" IconVariant="Regular" FontSize="20"/>
+                    </ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
+            </ui:NavigationView.MenuItems>
+
+            <ui:NavigationView.FooterMenuItems>
+                <ui:NavigationViewItem Content="关于应用" Tag="about">
+                    <ui:NavigationViewItem.Icon>
+                        <ic:FluentIcon Icon="Info" IconVariant="Regular" FontSize="20"/>
+                    </ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
+            </ui:NavigationView.FooterMenuItems>
+
+            <!-- 内容区：左内边距一致；右侧 0 让滚动条贴窗口右缘（内容右距由各面板自留） -->
+            <Grid x:Name="ContentRoot" Margin="24,0,0,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <!-- ═══ 墨迹书写页（默认显示）═══ -->
+                <Grid x:Name="WritingSection" Grid.Row="0" Grid.RowSpan="2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,20,0,20">
+                        <ic:FluentIcon Icon="Signature" IconVariant="Regular" IconSize="Resizable" FontSize="32" VerticalAlignment="Center"/>
+                        <TextBlock Text="墨迹书写" FontSize="24" FontWeight="SemiBold" Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ikw:SimpleStackPanel Spacing="4" Margin="0,0,24,24">
+                            <ui:SettingsCard Header="显示画笔光标" IsEnabled="True">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="Cursor" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ui:ToggleSwitch x:Name="ShowCursorToggle"
+                                                 IsOn="{Binding Settings.IsShowCursor, Mode=TwoWay}"
+                                                 OffContent="关" OnContent="开"
+                                                 Toggled="ShowCursorToggle_Toggled"/>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="墨迹平滑" Description="开启后，将通过贝塞尔曲线美化墨迹">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="ShapeOrganic" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ui:ToggleSwitch x:Name="InkSmoothToggle"
+                                                 IsOn="{Binding Settings.IsFitToCurve, Mode=TwoWay}"
+                                                 OffContent="关" OnContent="开"
+                                                 Toggled="InkSmoothToggle_Toggled"/>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="选择笔锋样式">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="Pen" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ComboBox x:Name="ComboBoxPenStyle"
+                                          MinWidth="110"
+                                          SelectionChanged="ComboBoxPenStyle_SelectionChanged">
+                                    <ComboBoxItem Content="时间笔锋"/>
+                                    <ComboBoxItem Content="点集笔锋"/>
+                                    <ComboBoxItem Content="速率笔锋"/>
+                                    <ComboBoxItem Content="关闭笔锋"/>
+                                </ComboBox>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard x:Name="TimePenGrowMsCard" Header="时间笔锋墨迹点长满时间" Description="该设置将在启用时间笔锋时生效，数字越大，笔锋越明显">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ui:FontIcon Glyph="&#xE916;" FontFamily="{StaticResource FluentIconFontFamily}" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" Text="ms" VerticalAlignment="Center" FontSize="16"
+                                               Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="8,0,0,0"/>
+                                    <TextBox x:Name="TimePenGrowMsBox"
+                                             Width="80"
+                                             VerticalAlignment="Center"
+                                             TextChanged="TimePenGrowMsBox_TextChanged"/>
+                                </DockPanel>
+                            </ui:SettingsCard>
+
+                        </ikw:SimpleStackPanel>
+                    </ScrollViewer>
+                </Grid>
+
+                <!-- ═══ 应用主题页（默认隐藏，切导航时显示）═══ -->
+                <Grid x:Name="AppearanceSection" Visibility="Collapsed" Grid.Row="0" Grid.RowSpan="2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,20,0,20">
+                        <ic:FluentIcon Icon="PaintBrush" IconVariant="Regular" IconSize="Resizable" FontSize="32" VerticalAlignment="Center"/>
+                        <TextBlock Text="应用主题" FontSize="24" FontWeight="SemiBold" Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ikw:SimpleStackPanel Spacing="4" Margin="0,0,24,24">
+                            <ui:SettingsCard Header="主题色" IsEnabled="True">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="Color" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <Button Content="选取颜色" MinWidth="108" HorizontalAlignment="Right"
+                                        Style="{DynamicResource {x:Static ui:ThemeKeys.AccentButtonStyleKey}}"
+                                        Click="AccentColorChevron_Click"/>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="颜色主题" IsEnabled="True">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="DarkTheme" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ComboBox x:Name="ComboBoxTheme"
+                                          HorizontalAlignment="Right"
+                                          SelectedIndex="2"
+                                          SelectionChanged="ComboBoxTheme_SelectionChanged">
+                                    <ComboBoxItem Content="浅色"/>
+                                    <ComboBoxItem Content="深色"/>
+                                    <ComboBoxItem Content="跟随系统"/>
+                                </ComboBox>
+                            </ui:SettingsCard>
+                        </ikw:SimpleStackPanel>
+                    </ScrollViewer>
+                </Grid>
+
+                <!-- ═══ PDF阅读页（原外观页展开组拆分为普通卡）═══ -->
+                <Grid x:Name="PdfBarSection" Visibility="Collapsed" Grid.Row="0" Grid.RowSpan="2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,20,0,20">
+                        <ic:FluentIcon Icon="DocumentPdf" IconVariant="Regular" IconSize="Resizable" FontSize="32" VerticalAlignment="Center"/>
+                        <TextBlock Text="PDF阅读" FontSize="24" FontWeight="SemiBold" Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ikw:SimpleStackPanel Spacing="4" Margin="0,0,24,24">
+                            <ui:SettingsExpander Header="墨迹栏" IsExpanded="True">
+                                <ui:SettingsExpander.HeaderIcon>
+                                    <ic:FluentIcon Icon="PanelBottom" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsExpander.HeaderIcon>
+                                <ui:SettingsExpander.Items>
+                            <ui:SettingsCard Header="显示文字注释">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="SlideText" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ui:ToggleSwitch x:Name="FloatBarTextToggle"
+                                                 IsOn="{Binding Settings.IsEnableDisPlayFloatBarText, Mode=TwoWay}"
+                                                 OffContent="关" OnContent="开"
+                                                 Toggled="FloatBarTextToggle_Toggled"/>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="缩放大小">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="ZoomIn" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="16"
+                                               Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="12,0,0,0" MinWidth="40"
+                                               TextAlignment="Right">
+                                        <Run x:Name="FloatingBarScaleValue" Text="100%"/>
+                                    </TextBlock>
+                                    <Slider x:Name="FloatingBarScaleSlider"
+                                            Minimum="50" Maximum="150" TickFrequency="5" IsSnapToTickEnabled="True"
+                                            Width="220"
+                                            ValueChanged="FloatingBarScaleSlider_ValueChanged"/>
+                                </DockPanel>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="底部边距">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="PaddingDown" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="16"
+                                               Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="12,0,0,0" MinWidth="40"
+                                               TextAlignment="Right">
+                                        <Run x:Name="FloatingBarBottomMarginValue" Text="16px"/>
+                                    </TextBlock>
+                                    <Slider x:Name="FloatingBarBottomMarginSlider"
+                                            Minimum="0" Maximum="50" TickFrequency="1" IsSnapToTickEnabled="True"
+                                            Width="220"
+                                            Value="{Binding Settings.FloatingBarBottomMargin, Mode=TwoWay}"
+                                            ValueChanged="FloatingBarBottomMarginSlider_ValueChanged"/>
+                                </DockPanel>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="右侧边距">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="PaddingRight" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="16"
+                                               Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="12,0,0,0" MinWidth="40"
+                                               TextAlignment="Right">
+                                        <Run x:Name="FloatingBarRightMarginValue" Text="16px"/>
+                                    </TextBlock>
+                                    <Slider x:Name="FloatingBarRightMarginSlider"
+                                            Minimum="0" Maximum="50" TickFrequency="1" IsSnapToTickEnabled="True"
+                                            Width="220"
+                                            Value="{Binding Settings.FloatingBarRightMargin, Mode=TwoWay}"
+                                            ValueChanged="FloatingBarRightMarginSlider_ValueChanged"/>
+                                </DockPanel>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="不透明度">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="Blur" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="16"
+                                               Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="12,0,0,0" MinWidth="40"
+                                               TextAlignment="Right">
+                                        <Run x:Name="FloatingBarOpacityValue" Text="75%"/>
+                                    </TextBlock>
+                                    <Slider x:Name="FloatingBarOpacitySlider"
+                                            Minimum="0" Maximum="100" TickFrequency="5" IsSnapToTickEnabled="True"
+                                            Width="220"
+                                            ValueChanged="FloatingBarOpacitySlider_ValueChanged"/>
+                                </DockPanel>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="显示背景色" Description="启用IC经典彩色渐变背景">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="ColorBackground" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ui:ToggleSwitch x:Name="ColorfulFloatingBarToggle"
+                                                 IsOn="{Binding Settings.IsColorfulViewboxFloatingBar, Mode=TwoWay}"
+                                                 OffContent="关" OnContent="开"
+                                                 Toggled="ColorfulFloatingBarToggle_Toggled"/>
+                            </ui:SettingsCard>
+                                </ui:SettingsExpander.Items>
+                            </ui:SettingsExpander>
+
+                            <ui:SettingsCard Header="设置为默认PDF应用">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="DocumentCheckmark" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <Button Content="设置为默认" HorizontalAlignment="Right"
+                                        Style="{DynamicResource {x:Static ui:ThemeKeys.AccentButtonStyleKey}}"
+                                        Click="SetDefaultPdfApp_Click"/>
+                            </ui:SettingsCard>
+                        </ikw:SimpleStackPanel>
+                    </ScrollViewer>
+                </Grid>
+
+                <!-- ═══ 画板书写页（原黑板墨迹栏展开组拆分为普通卡）═══ -->
+                <Grid x:Name="BoardBarSection" Visibility="Collapsed" Grid.Row="0" Grid.RowSpan="2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,20,0,20">
+                        <ic:FluentIcon Icon="Whiteboard" IconVariant="Regular" IconSize="Resizable" FontSize="32" VerticalAlignment="Center"/>
+                        <TextBlock Text="画板书写" FontSize="24" FontWeight="SemiBold" Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ikw:SimpleStackPanel Spacing="4" Margin="0,0,24,24">
+                            <ui:SettingsCard Header="缩放大小">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="ZoomIn" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="16"
+                                               Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="12,0,0,0" MinWidth="40"
+                                               TextAlignment="Right">
+                                        <Run x:Name="BlackboardScaleValue" Text="100%"/>
+                                    </TextBlock>
+                                    <Slider x:Name="BlackboardScaleSlider"
+                                            Minimum="50" Maximum="150" TickFrequency="5" IsSnapToTickEnabled="True"
+                                            Width="220"
+                                            ValueChanged="BlackboardScaleSlider_ValueChanged"/>
+                                </DockPanel>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="底部边距">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="PaddingDown" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="16"
+                                               Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="12,0,0,0" MinWidth="40"
+                                               TextAlignment="Right">
+                                        <Run x:Name="BlackboardBottomMarginValue" Text="0px"/>
+                                    </TextBlock>
+                                    <Slider x:Name="BlackboardBottomMarginSlider"
+                                            Minimum="0" Maximum="50" TickFrequency="1" IsSnapToTickEnabled="True"
+                                            Width="220"
+                                            Value="{Binding Settings.BlackboardBarBottomMargin, Mode=TwoWay}"
+                                            ValueChanged="BlackboardBottomMarginSlider_ValueChanged"/>
+                                </DockPanel>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="不透明度">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="Blur" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="16"
+                                               Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="12,0,0,0" MinWidth="40"
+                                               TextAlignment="Right">
+                                        <Run x:Name="BlackboardOpacityValue" Text="75%"/>
+                                    </TextBlock>
+                                    <Slider x:Name="BlackboardOpacitySlider"
+                                            Minimum="0" Maximum="100" TickFrequency="5" IsSnapToTickEnabled="True"
+                                            Width="220"
+                                            ValueChanged="BlackboardOpacitySlider_ValueChanged"/>
+                                </DockPanel>
+                            </ui:SettingsCard>
+                        </ikw:SimpleStackPanel>
+                    </ScrollViewer>
+                </Grid>
+
+                <!-- ═══ 墨迹纠正页（纠正开关 + 相似度门槛灵敏度）═══ -->
+                <Grid x:Name="InkRecognitionSection" Visibility="Collapsed" Grid.Row="0" Grid.RowSpan="2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,20,0,20">
+                        <ic:FluentIcon Icon="PenSparkle" IconVariant="Regular" IconSize="Resizable" FontSize="32" VerticalAlignment="Center"/>
+                        <TextBlock Text="墨迹纠正" FontSize="24" FontWeight="SemiBold" Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ikw:SimpleStackPanel Spacing="4" Margin="0,0,24,24">
+                            <ui:SettingsCard Header="抬笔墨迹纠正"
+                                             Description="当笔抬起时，应用将自动把该笔画纠正为标准图形，支持三角形、圆形、矩形、平行四边形等多种图形">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="PenSparkle" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ui:ToggleSwitch x:Name="InkToShapeToggle"
+                                                 IsOn="{Binding Settings.IsInkToShapeEnabled, Mode=TwoWay}"
+                                                 OffContent="关" OnContent="开"
+                                                 Toggled="InkToShapeToggle_Toggled"/>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="抬笔墨迹纠正灵敏度">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="Options" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="16"
+                                               Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="12,0,0,0" MinWidth="40"
+                                               TextAlignment="Right">
+                                        <Run x:Name="InkToShapeSensitivityValue" Text="75%"/>
+                                    </TextBlock>
+                                    <Slider x:Name="InkToShapeSensitivitySlider"
+                                            Minimum="0" Maximum="100" TickFrequency="5" IsSnapToTickEnabled="True"
+                                            Width="220"
+                                            ValueChanged="InkToShapeSensitivitySlider_ValueChanged"/>
+                                </DockPanel>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="停顿墨迹纠正"
+                                             Description="在笔迹停顿一段时间后，应用将自动把该笔画纠正为标准图形，支持三角形、圆形、矩形、平行四边形等多种图形">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="PenOff" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ui:ToggleSwitch x:Name="PauseInkToShapeToggle"
+                                                 IsOn="{Binding Settings.IsPauseInkToShapeEnabled, Mode=TwoWay}"
+                                                 OffContent="关" OnContent="开"
+                                                 Toggled="PauseInkToShapeToggle_Toggled"/>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="停顿墨迹纠正灵敏度">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="Options" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="16"
+                                               Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="12,0,0,0" MinWidth="40"
+                                               TextAlignment="Right">
+                                        <Run x:Name="PauseInkToShapeSensitivityValue" Text="75%"/>
+                                    </TextBlock>
+                                    <Slider x:Name="PauseInkToShapeSensitivitySlider"
+                                            Minimum="0" Maximum="100" TickFrequency="5" IsSnapToTickEnabled="True"
+                                            Width="220"
+                                            ValueChanged="PauseInkToShapeSensitivitySlider_ValueChanged"/>
+                                </DockPanel>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="停顿触发墨迹纠正时间">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="Clock" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" Text="ms" VerticalAlignment="Center" FontSize="16"
+                                               Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="8,0,0,0"/>
+                                    <TextBox x:Name="PauseInkToShapeDelayMsBox"
+                                             Width="80"
+                                             VerticalAlignment="Center"
+                                             TextChanged="PauseInkToShapeDelayMsBox_TextChanged"/>
+                                </DockPanel>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="停顿容错值">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="CalligraphyPenError" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" Text="px" VerticalAlignment="Center" FontSize="16"
+                                               Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="8,0,0,0"/>
+                                    <TextBox x:Name="PauseInkToShapeToleranceBox"
+                                             Width="80"
+                                             VerticalAlignment="Center"
+                                             TextChanged="PauseInkToShapeToleranceBox_TextChanged"/>
+                                </DockPanel>
+                            </ui:SettingsCard>
+                        </ikw:SimpleStackPanel>
+                    </ScrollViewer>
+                </Grid>
+
+                <!-- ═══ 手掌擦除页（开关 + 笔尖模式 + 两档触摸阈值）═══ -->
+                <Grid x:Name="PalmEraseSection" Visibility="Collapsed" Grid.Row="0" Grid.RowSpan="2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,20,0,20">
+                        <ic:FluentIcon Icon="HandLeft" IconVariant="Regular" IconSize="Resizable" FontSize="32" VerticalAlignment="Center"/>
+                        <TextBlock Text="手掌擦除" FontSize="24" FontWeight="SemiBold" Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ikw:SimpleStackPanel Spacing="4" Margin="0,0,24,24">
+                            <ui:SettingsCard Header="手掌擦除" Description="当触摸面积达到阈值时，将自动切换为橡皮">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="HandLeft" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ui:ToggleSwitch x:Name="PalmEraseToggle"
+                                                 IsOn="{Binding Settings.IsPalmEraseEnabled, Mode=TwoWay}"
+                                                 OffContent="关" OnContent="开"
+                                                 Toggled="PalmEraseToggle_Toggled"/>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="笔尖模式" Description="减小手掌擦触摸面积阈值以更好地适配笔头擦除">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="Edit" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ui:ToggleSwitch x:Name="NibModeToggle"
+                                                 IsOn="{Binding Settings.IsNibModeEnabled, Mode=TwoWay}"
+                                                 OffContent="关" OnContent="开"
+                                                 Toggled="NibModeToggle_Toggled"/>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="手掌模式触摸阈值">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="SquareEraser" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" Text="px" VerticalAlignment="Center" FontSize="16"
+                                               Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="8,0,0,0"/>
+                                    <TextBox x:Name="PalmModeThresholdBox"
+                                             Width="80"
+                                             VerticalAlignment="Center"
+                                             TextChanged="PalmModeThresholdBox_TextChanged"/>
+                                </DockPanel>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="笔尖模式触摸阈值">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="SquareEraser" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" Text="px" VerticalAlignment="Center" FontSize="16"
+                                               Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="8,0,0,0"/>
+                                    <TextBox x:Name="NibModeThresholdBox"
+                                             Width="80"
+                                             VerticalAlignment="Center"
+                                             TextChanged="NibModeThresholdBox_TextChanged"/>
+                                </DockPanel>
+                            </ui:SettingsCard>
+                        </ikw:SimpleStackPanel>
+                    </ScrollViewer>
+                </Grid>
+
+                <!-- ═══ 数据存储页（自动保存 + 启动自动删除 + 保留天数）═══ -->
+                <Grid x:Name="DataStorageSection" Visibility="Collapsed" Grid.Row="0" Grid.RowSpan="2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,20,0,20">
+                        <ic:FluentIcon Icon="Storage" IconVariant="Regular" IconSize="Resizable" FontSize="32" VerticalAlignment="Center"/>
+                        <TextBlock Text="数据存储" FontSize="24" FontWeight="SemiBold" Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ikw:SimpleStackPanel Spacing="4" Margin="0,0,24,24">
+                            <ui:SettingsCard Header="自动保存墨迹书写数据"
+                                             Description="采用侧车存储，不修改原PDF文件，适合教学环境，后续会加直接保存PDF文件的存储功能">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="SaveArrowRight" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ui:ToggleSwitch x:Name="AutoSaveInkToggle"
+                                                 IsOn="{Binding Settings.IsAutoSaveInk, Mode=TwoWay}"
+                                                 OffContent="关" OnContent="开"
+                                                 Toggled="AutoSaveInkToggle_Toggled"/>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="自动删除超过时间的墨迹书写数据"
+                                             Description="在启动时自动删除超过指定时间的墨迹书写数据">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="DeleteLines" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ui:ToggleSwitch x:Name="AutoCleanInkToggle"
+                                                 IsOn="{Binding Settings.IsAutoCleanInk, Mode=TwoWay}"
+                                                 OffContent="关" OnContent="开"
+                                                 Toggled="AutoCleanInkToggle_Toggled"/>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="自动删除墨迹书写数据时间">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="Clock" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" Text="天" VerticalAlignment="Center" FontSize="16"
+                                               Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="8,0,0,0"/>
+                                    <TextBox x:Name="AutoCleanDaysBox"
+                                             Width="80"
+                                             VerticalAlignment="Center"
+                                             TextChanged="AutoCleanDaysBox_TextChanged"/>
+                                </DockPanel>
+                            </ui:SettingsCard>
+                        </ikw:SimpleStackPanel>
+                    </ScrollViewer>
+                </Grid>
+
+                <!-- ═══ 关于应用页（介绍 + 参考项目/项目主页/问题反馈超链接）═══ -->
+                <Grid x:Name="AboutSection" Visibility="Collapsed" Grid.Row="0" Grid.RowSpan="2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,20,0,20">
+                        <ic:FluentIcon Icon="Info" IconVariant="Regular" IconSize="Resizable" FontSize="32" VerticalAlignment="Center"/>
+                        <TextBlock Text="关于应用" FontSize="24" FontWeight="SemiBold" Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ikw:SimpleStackPanel Spacing="12" Margin="0,0,24,24">
+                            <TextBlock FontSize="15" TextWrapping="Wrap" Foreground="{DynamicResource ToolbarForegroundBrush}">
+                                <Run Text="• "/><Run Text=" InkCanvasForPDF —— 一个高性能 PDF 墨迹书写应用"/>
+                            </TextBlock>
+                            <TextBlock FontSize="15" TextWrapping="Wrap" Foreground="{DynamicResource ToolbarForegroundBrush}">
+                                <Run Text="• "/><Run Text=" 基于C# + .NET 10 + WPF开发"/>
+                            </TextBlock>
+                            <TextBlock FontSize="15" TextWrapping="Wrap" Foreground="{DynamicResource ToolbarForegroundBrush}">
+                                <Run Text="• "/><Run Text=" 本应用墨迹书写板块参考了 "/><Hyperlink Tag="https://github.com/InkCanvas/Ink-Canvas-Artistry" Click="AboutHyperlink_Click">Ink-Canvas-Artistry</Hyperlink>
+                            </TextBlock>
+                            <TextBlock FontSize="15" TextWrapping="Wrap" Foreground="{DynamicResource ToolbarForegroundBrush}">
+                                <Run Text="• "/><Run Text=" 本应用PDF阅读板块参考了 "/><Hyperlink Tag="https://github.com/SteveTheKiller/KillerPDF" Click="AboutHyperlink_Click">KillerPDF</Hyperlink>
+                            </TextBlock>
+                            <TextBlock FontSize="15" TextWrapping="Wrap" Foreground="{DynamicResource ToolbarForegroundBrush}">
+                                <Run Text="•  "/><Hyperlink Tag="https://github.com/Eason-2012/InkCanvasForPDF" Click="AboutHyperlink_Click">本应用项目主页</Hyperlink>
+                            </TextBlock>
+                            <TextBlock FontSize="15" TextWrapping="Wrap" Foreground="{DynamicResource ToolbarForegroundBrush}">
+                                <Run Text="•  "/><Hyperlink Tag="https://github.com/Eason-2012/InkCanvasForPDF/issues/new" Click="AboutHyperlink_Click">向开发者报告问题</Hyperlink>
+                            </TextBlock>
+                            <TextBlock FontSize="15" TextWrapping="Wrap" Foreground="{DynamicResource ToolbarForegroundBrush}">
+                                <Run Text="•  "/><Hyperlink Click="ThirdPartyDeps_Click">第三方代码参考</Hyperlink>
+                            </TextBlock>
+                        </ikw:SimpleStackPanel>
+                    </ScrollViewer>
+                </Grid>
+
+                <!-- ═══ 应用更新页（状态区 + 自动检查/通道/代理/更新日志；无页内标题，状态区即顶部）═══ -->
+                <Grid x:Name="UpdateSection" Visibility="Collapsed" Grid.Row="0" Grid.RowSpan="2">
+                    <ScrollViewer Grid.Row="0" Grid.RowSpan="2" Margin="0,20,0,0" VerticalScrollBarVisibility="Auto">
+                        <ikw:SimpleStackPanel Spacing="4" Margin="0,0,24,24">
+
+                            <!-- 状态区：图标竖跨两行 + 标题/副标题左对齐 + 右侧按钮，进度条独占第三行 -->
+                            <Border Padding="16,14" Margin="0,0,0,8">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+
+                                    <ic:FluentIcon x:Name="UpdateStateIcon" Grid.Row="0" Grid.RowSpan="2" Grid.Column="0"
+                                                   Icon="ArrowSync" IconVariant="Regular" IconSize="Resizable" FontSize="48"
+                                                   VerticalAlignment="Center" Margin="0,0,16,0"
+                                                   Foreground="{DynamicResource ToolbarForegroundBrush}"/>
+
+                                    <TextBlock x:Name="UpdateStateTitle" Grid.Row="0" Grid.Column="1"
+                                               Text="您已更新到最新版本" FontSize="24" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource ToolbarForegroundBrush}"
+                                               VerticalAlignment="Center" TextWrapping="Wrap"/>
+
+                                    <TextBlock x:Name="UpdateStateSubtitle" Grid.Row="1" Grid.Column="1"
+                                               Text="上次检查时间：" FontSize="16" Margin="0,4,0,0" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource ToolbarForegroundBrush}"
+                                               VerticalAlignment="Center"/>
+
+                                    <Button x:Name="UpdateStateButton" Grid.Row="0" Grid.RowSpan="2" Grid.Column="2"
+                                            MinWidth="108" Content="检查更新"
+                                            Style="{DynamicResource {x:Static ui:ThemeKeys.AccentButtonStyleKey}}"
+                                            HorizontalAlignment="Right" VerticalAlignment="Center"
+                                            Click="UpdateCheck_Click"/>
+
+                                    <ui:ProgressBar x:Name="UpdateProgressBar" Grid.Row="2" Grid.ColumnSpan="3"
+                                                    Height="4" Margin="0,12,0,0" Visibility="Collapsed"/>
+                                </Grid>
+                            </Border>
+
+                            <ui:SettingsCard Header="启用自动检查更新"
+                                             Description="开启后，应用将在启动时自动检查并下载更新，退出应用时自动安装更新">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="ArrowSyncCircle" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ui:ToggleSwitch x:Name="AutoUpdateToggle"
+                                                 IsOn="{Binding Settings.IsAutoCheckUpdate, Mode=TwoWay}"
+                                                 OffContent="关" OnContent="开"
+                                                 Toggled="AutoUpdateToggle_Toggled"/>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="选择更新通道">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="Channel" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ComboBox x:Name="UpdateChannelCombo"
+                                          MinWidth="110"
+                                          HorizontalAlignment="Right"
+                                          SelectionChanged="UpdateChannelCombo_SelectionChanged">
+                                    <ComboBoxItem Content="稳定通道"/>
+                                    <ComboBoxItem Content="测试通道"/>
+                                </ComboBox>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="配置更新代理"
+                                             Description="配置更新代理以更快速地连接到GitHub，留空则为裸连GitHub">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="Cloud" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <TextBox x:Name="UpdateProxyBox"
+                                         Width="240"
+                                         HorizontalAlignment="Right"
+                                         TextChanged="UpdateProxyBox_TextChanged"/>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="查看更新日志"
+                                             IsEnabled="True" IsClickEnabled="True"
+                                             Click="ViewChangelog_Click">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="History" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                </ui:SettingsCard.HeaderIcon>
+                            </ui:SettingsCard>
+
+                        </ikw:SimpleStackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </Grid>
+        </ui:NavigationView>
+    </Grid>
+</UserControl>
