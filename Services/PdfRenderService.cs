@@ -86,9 +86,10 @@ public sealed class PdfRenderService : IDisposable
     public ImageSource RenderPage(int pageIndex, int renderWidth, int baseWidth, int baseHeight)
         => RenderAt(pageIndex, renderWidth, baseWidth, baseHeight);
 
-    /// <summary>取某一页的 base 位图（≤2048 宽，不随缩放），LRU 缓存供回扫/缩小时快速显示。
-    /// 同步渲染核心，仅供 <see cref="RenderPageBaseAsync"/> 在后台线程调用。</summary>
-    public ImageSource RenderPageBase(int pageIndex, int baseWidth, int baseHeight)
+    /// <summary>取某一页的 base 位图，LRU 缓存供回扫/缩小时快速显示。
+    /// renderWidth = 实际栅格化像素宽（≤2048，不随缩放）；baseWidth/baseHeight = 显示 DIP 尺寸（= 槽位尺寸，
+    /// 与 hi-res 路径同构，保证渲染框比例与烘焙 DPI 正确）。同步渲染核心，仅供 <see cref="RenderPageBaseAsync"/> 在后台线程调用。</summary>
+    public ImageSource RenderPageBase(int pageIndex, int renderWidth, int baseWidth, int baseHeight)
     {
         int generation = Volatile.Read(ref _cacheGeneration);
         lock (_baseCacheLock)
@@ -100,7 +101,7 @@ public sealed class PdfRenderService : IDisposable
             }
         }
 
-        var image = RenderAt(pageIndex, baseWidth, baseWidth, baseHeight);
+        var image = RenderAt(pageIndex, renderWidth, baseWidth, baseHeight);
         lock (_baseCacheLock)
         {
             // 渲染期间缓存被清（换文档/视口宽度变化）→ 丢弃过期写入，避免旧尺寸/旧文档位图混入新缓存。
@@ -125,11 +126,11 @@ public sealed class PdfRenderService : IDisposable
         });
 
     /// <summary>后台取某一页的 base 位图（语义同 <see cref="RenderPageBase"/>，LRU 缓存线程安全）。</summary>
-    public Task<ImageSource> RenderPageBaseAsync(int pageIndex, int baseWidth, int baseHeight)
+    public Task<ImageSource> RenderPageBaseAsync(int pageIndex, int renderWidth, int baseWidth, int baseHeight)
         => Task.Run(() =>
         {
             _pageRenderSem.Wait();
-            try { return RenderPageBase(pageIndex, baseWidth, baseHeight); }
+            try { return RenderPageBase(pageIndex, renderWidth, baseWidth, baseHeight); }
             finally { _pageRenderSem.Release(); }
         });
 

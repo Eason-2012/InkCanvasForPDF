@@ -122,12 +122,24 @@ public partial class InkToolBar
     private bool _isLongPressSelected;
 
     /// <summary>长按保持选中（泛化）：按住 500ms 未松开即以正常选中样式选中该图形（无灰色动画）。
-    /// mode 取自父 Border 的 Tag；短按（500ms 内松开）不在此处理，交给各 MouseUp handler。</summary>
+    /// mode 取自父 Border 的 Tag；短按（500ms 内松开）不在此处理，交给各 MouseUp handler。
+    /// 右键单击等同长按：立即保持选中（不进计时、不写 _lastMouseDownSender，松开时 MouseUp 直接忽略）。</summary>
     private async void Image_MouseDown(object sender, MouseButtonEventArgs e)
     {
         if (sender is not Image img
             || LogicalTreeHelper.GetParent(img) is not Border { Tag: not null } b
             || !int.TryParse(b.Tag.ToString(), out var mode)) return;
+
+        if (e.ChangedButton == MouseButton.Right)
+        {
+            _isLongPressSelected = true;
+            SelectShape(mode);
+            // 长按保持选中提示：中下侧成功样式浮动通知（IUWM InfoBar，3 秒自动关闭）
+            if (Window.GetWindow(this) is MainWindow tipmw)
+                tipmw.ShowFloatingTip("已保持选中该图形");
+            e.Handled = true;
+            return;
+        }
 
         _lastMouseDownSender = sender;
 

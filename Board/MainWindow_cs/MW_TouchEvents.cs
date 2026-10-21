@@ -2,6 +2,7 @@
 
 using InkCanvasForPDF.Board.Helpers;
 using InkCanvasForPDF.Services;
+using InkCanvasForPDF.ViewModels;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -60,7 +61,6 @@ namespace InkCanvasForPDF.Board
             }
 
             double boundWidth = e.GetTouchPoint(null).Bounds.Width;
-            double eraserMultiplier = PalmEraseMetrics.GetEraserMultiplier();
 
             // 手掌擦除开关门控（仅书写模式）：关闭时大接触不再自动切面积擦，多指各自停墨
             if (Vm?.Settings.IsPalmEraseEnabled == true
@@ -68,10 +68,8 @@ namespace InkCanvasForPDF.Board
                 && boundWidth > BoundsWidth)
             {
                 if (drawingShapeMode == 0 && forceEraser) return;
-                // 尺寸 = 触点宽 × k(橡皮滑块/10) × 特殊屏补偿 ÷ 4（ICA MW_TouchEvents L84 多触摸 1/4 尺寸）
-                double slider = (Vm?.InkTool.EraserSize ?? 40) / 4;
-                double eraserSize = boundWidth * PalmEraseMetrics.GetSizeK(slider) * eraserMultiplier * 0.25;
-                inkCanvas.EraserShape = new RectangleStylusShape(eraserSize, InkCircleCursor.EraserBoardHeight(eraserSize));
+                // 尺寸 = 橡皮大小 EraserDiameter（与黑板擦光标/面积擦同源；判定仍按触点宽度阈值）
+                inkCanvas.EraserShape = new RectangleStylusShape(EraserDiameter, InkCircleCursor.EraserBoardHeight(EraserDiameter));
                 TouchDownPointsList[e.TouchDevice.Id] = InkCanvasEditingMode.EraseByPoint;
                 inkCanvas.EditingMode = InkCanvasEditingMode.EraseByPoint;
             }
@@ -106,10 +104,18 @@ namespace InkCanvasForPDF.Board
                 else
                 {
                     // 触摸屏 TabletDeviceType.Touch
-                    inkCanvas.Strokes.Add(GetStrokeVisual(e.StylusDevice.Id).Stroke);
-                    await Task.Delay(5); // 避免渲染墨迹完成前预览墨迹被删除导致墨迹闪烁
-                    inkCanvas.Children.Remove(GetVisualCanvas(e.StylusDevice.Id));
-                    inkCanvas_StrokeCollected(inkCanvas, new InkCanvasStrokeCollectedEventArgs(GetStrokeVisual(e.StylusDevice.Id).Stroke));
+                    // 时间笔锋叠加层已接管该设备（多触摸模式自绘）：控制器在抬笔处理里自行提交，
+                    // 这里不再把 StrokeVisual 重复入集合（Move 阶段已跳过绘制，通常也没有 StrokeVisual）。
+                    if (!inkCanvas.Controller.HasSession(e.StylusDevice.Id)
+                        && StrokeVisualList.TryGetValue(e.StylusDevice.Id, out var touchVisual)
+                        && touchVisual.Stroke != null)
+                    {
+                        inkCanvas.Strokes.Add(touchVisual.Stroke);
+                        await Task.Delay(5); // 避免渲染墨迹完成前预览墨迹被删除导致墨迹闪烁
+                        if (GetVisualCanvas(e.StylusDevice.Id) is { } visualCanvas)
+                            inkCanvas.Children.Remove(visualCanvas);
+                        inkCanvas_StrokeCollected(inkCanvas, new InkCanvasStrokeCollectedEventArgs(touchVisual.Stroke));
+                    }
                 }
             }
             catch (Exception ex)
@@ -138,6 +144,8 @@ namespace InkCanvasForPDF.Board
             try
             {
                 if (GetTouchDownPointsList(e.StylusDevice.Id) != InkCanvasEditingMode.None) return;
+                // 叠加层已在绘制该设备（时间笔锋 / 硬笔屏蔽 / 多触摸自绘）：跳过 StrokeVisual，避免双份湿墨
+                if (inkCanvas.Controller.HasSession(e.StylusDevice.Id)) return;
                 try
                 {
                     if (e.StylusDevice.StylusButtons[1].StylusButtonState == StylusButtonState.Down) return;
@@ -217,16 +225,18 @@ namespace InkCanvasForPDF.Board
                 MouseTouchMove(iniP);
             }
             inkCanvas.Opacity = 1;
-            double boundsWidth = GetTouchBoundWidth(e), eraserMultiplier = PalmEraseMetrics.GetEraserMultiplier();
+            double boundsWidth = GetTouchBoundWidth(e);
 
             // 手掌擦除（仅书写模式，受橡皮菜单开关门控）：接触面积超阈值 → 面积擦，
-            // 尺寸 = 触点宽 × k(橡皮滑块/10) × 特殊屏补偿（ICA MW_TouchEvents L236-255 公式，k 改由滑块驱动）
+            // 尺寸 = 橡皮大小 EraserDiameter（与黑板擦光标/面积擦同源，判定仍按触点宽度阈值）
             bool palmErase = Vm?.Settings.IsPalmEraseEnabled == true
                              && PalmEraseMetrics.IsTouchEraseAllowed()
                              && boundsWidth > BoundsWidth;
             if (palmErase)
             {
                 isLastTouchEraser = true;
+                // 手掌不是书写设备：丢弃它可能已建立的时间笔锋会话，防止手掌湿墨被叠加层画出来
+                inkCanvas.Controller.AbortStroke(e.TouchDevice.Id);
                 if (drawingShapeMode == 0 && forceEraser) return;
                 if (boundsWidth <= BoundsWidth * 2.5
                     && BtnPPTSlideShowEnd.Visibility == Visibility.Visible && inkCanvas.Strokes.Count == 0
@@ -238,9 +248,7 @@ namespace InkCanvasForPDF.Board
                 }
                 else
                 {
-                    double slider = (Vm?.InkTool.EraserSize ?? 40) / 4;   // 橡皮粗细滑块显示值 1~20
-                    double eraserSize2 = boundsWidth * PalmEraseMetrics.GetSizeK(slider) * eraserMultiplier;
-                    inkCanvas.EraserShape = new RectangleStylusShape(eraserSize2, InkCircleCursor.EraserBoardHeight(eraserSize2));
+                    inkCanvas.EraserShape = new RectangleStylusShape(EraserDiameter, InkCircleCursor.EraserBoardHeight(EraserDiameter));
                     inkCanvas.EditingMode = InkCanvasEditingMode.EraseByPoint;   // 手掌擦除 = 仅面积擦
                 }
             }

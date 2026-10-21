@@ -77,23 +77,41 @@ namespace InkCanvasForPDF.Board
             // 时间笔锋：生长叠加层挂 Main_Grid（插在 inkCanvas 之后 = 干墨之上、工具条之下），
             // 不放 inkCanvas.Children——"点击清屏"会 inkCanvas.Children.Clear()（MW_BoardCompat BtnClear_Click）
             Main_Grid.Children.Insert(Math.Max(0, Main_Grid.Children.IndexOf(inkCanvas) + 1), inkCanvas.Controller.Overlay);
+            // 时间笔锋自绘笔画提交（多触摸模式：触摸设备由叠加层绘制、由控制器自建 Stroke 入集合）
+            inkCanvas.Controller.StrokeReady += (stroke, deviceId) =>
+            {
+                inkCanvas.Strokes.Add(stroke);
+                inkCanvas_StrokeCollected(inkCanvas, new InkCanvasStrokeCollectedEventArgs(stroke));
+            };
             RefreshTimePressureArmed();
         }
 
-        /// <summary>把「时间笔锋是否可用」（样式=时间笔锋 + 画笔档位 + 非荧光笔 + 非多触摸 + Ink 模式）
-        /// 与压感开关/长满时间同步给控制器。失去武装会立即中断当前笔画并清空叠加层。
-        /// 多触摸模式不启用：其书写走 MultiTouchInput 自制自绘路径（StrokeVisual），与 DynamicRenderer 体系无关。</summary>
+        /// <summary>把「时间笔锋是否可用」（样式=时间笔锋 + 画笔档位 + 非荧光笔 + 书写模式）与压感开关/长满时间
+        /// 同步给控制器。多触摸模式下触碰设备由叠加层按设备自绘（时间笔锋同样生效），数位笔仍走原生命中管线。</summary>
         public void RefreshTimePressureArmed()
         {
             var c = inkCanvas.Controller;
             c.DisplayScale = 1.0;   // 画板墨迹面无整层缩放变换
             c.PressureEnabled = _pressureEnabled;
             c.GrowMs = TimePenGrowMs;
+            bool inkMode = isInMultiTouchMode || inkCanvas.EditingMode == InkCanvasEditingMode.Ink;
             bool armed = Settings.Canvas.InkStyle == 3
                          && inkColor <= 100
-                         && !isInMultiTouchMode
-                         && inkCanvas.EditingMode == InkCanvasEditingMode.Ink;
+                         && inkMode;
             c.SetCollectArmed(armed);
+            // 屏蔽模式（0/1 笔锋 + 硬笔）：屏蔽默认湿墨、叠加层等宽自绘（与时间笔锋互斥，依 InkStyle 分流）
+            bool shield = Settings.Canvas.InkStyle is 0 or 1
+                          && !_pressureEnabled
+                          && inkColor <= 100
+                          && inkMode;
+            c.SetShieldArmed(shield);
+            // 多触摸模式：全部设备交叠加层绘制（触摸不再走 StrokeVisual 湿墨）；数位笔抬笔仍由原生提交
+            c.SelfDrawAllDevices = isInMultiTouchMode;
+            c.MultiDeviceEnabled = false;
+            // 关闭笔锋（InkStyle=2）+ 硬笔：等宽交 WPF 渲染层开关 IgnorePressure（不再抬笔归一）；
+            // 荧光笔豁免（不参与笔锋/归一路径），软笔恒 false（真压感照旧）。
+            inkCanvas.DefaultDrawingAttributes.IgnorePressure =
+                Settings.Canvas.InkStyle == 2 && !_pressureEnabled && inkColor <= 100;
         }
 
         private void loadPenCanvas()

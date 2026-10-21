@@ -377,7 +377,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         OpenSettingsCommand = new RelayCommand(() => IsSettingsVisible = true);
         CloseSettingsCommand = new RelayCommand(() => IsSettingsVisible = false);
         Settings = SettingsService.Load();
-        InkTool.EraserSize = Settings.EraserSizeSetting * 4.0;   // 橡皮粗细设置 → 实际直径（1~20 ×4），启动即生效
+        InkTool.EraserSize = InkToolViewModel.EraserSizeFromSlider(Settings.EraserSizeSetting);   // 橡皮粗细设置 → 实际直径（15 + 3.5x），启动即生效
         InkTool.IsStrokeEraser = Settings.EraserModeByStrokeSetting;   // 橡皮模式（面积擦/墨迹擦）恢复
         // 恢复上次批注墨迹选项（LoadFromSettings：装入各类型记忆并按记忆页签类型装入活动值）
         InkTool.FitToCurve = Settings.IsFitToCurve;
@@ -954,7 +954,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         _pendingPageRenders.Add(index);
         Task<ImageSource> task = wantHi
             ? _pdf.RenderPageAsync(index, GetRenderWidth(page.Width), page.Width, page.Height)
-            : _pdf.RenderPageBaseAsync(index, GetBaseWidth(page.Width), page.Height);
+            : _pdf.RenderPageBaseAsync(index, GetBaseWidth(page.Width), page.Width, page.Height);
         task.ContinueWith(t => Application.Current?.Dispatcher.BeginInvoke(
             DispatcherPriority.Background,
             new Action(() => CompletePageRender(index, page, t))));

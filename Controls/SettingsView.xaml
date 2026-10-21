@@ -3,9 +3,13 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:ikw="http://schemas.inkore.net/lib/ui/wpf"
              xmlns:ui="http://schemas.inkore.net/lib/ui/wpf/modern"
-             xmlns:ic="clr-namespace:FluentIcons.Wpf;assembly=FluentIcons.Wpf">
+             xmlns:ic="clr-namespace:FluentIcons.Wpf;assembly=FluentIcons.Wpf"
+             xmlns:system="clr-namespace:System;assembly=mscorlib">
 
     <UserControl.Resources>
+        <!-- 设置卡片 HeaderIcon 槽位尺寸（iNKORE Viewbox 归一化，FontSize 无效）；
+             窗口级方案字典默认 20 在此被遮蔽。嫌大/嫌小只改这一个数字。 -->
+        <system:Double x:Key="SettingsCardHeaderIconMaxSize">24</system:Double>
     </UserControl.Resources>
 
     <!-- 根：不透明背景（跟随主题），整页盖住下方 PDF（设置页不再透出内容） -->
@@ -91,7 +95,7 @@
                         <ikw:SimpleStackPanel Spacing="4" Margin="0,0,24,24">
                             <ui:SettingsCard Header="显示画笔光标" IsEnabled="True">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="Cursor" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="Cursor" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <ui:ToggleSwitch x:Name="ShowCursorToggle"
                                                  IsOn="{Binding Settings.IsShowCursor, Mode=TwoWay}"
@@ -101,7 +105,7 @@
 
                             <ui:SettingsCard Header="墨迹平滑" Description="开启后，将通过贝塞尔曲线美化墨迹">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="ShapeOrganic" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="ShapeOrganic" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <ui:ToggleSwitch x:Name="InkSmoothToggle"
                                                  IsOn="{Binding Settings.IsFitToCurve, Mode=TwoWay}"
@@ -111,7 +115,7 @@
 
                             <ui:SettingsCard Header="选择笔锋样式">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="Pen" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="Pen" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <ComboBox x:Name="ComboBoxPenStyle"
                                           MinWidth="110"
@@ -125,7 +129,7 @@
 
                             <ui:SettingsCard x:Name="TimePenGrowMsCard" Header="时间笔锋墨迹点长满时间" Description="该设置将在启用时间笔锋时生效，数字越大，笔锋越明显">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ui:FontIcon Glyph="&#xE916;" FontFamily="{StaticResource FluentIconFontFamily}" FontSize="28"/>
+                                    <ic:FluentIcon Icon="Timer" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <DockPanel>
                                     <TextBlock DockPanel.Dock="Right" Text="ms" VerticalAlignment="Center" FontSize="16"
@@ -155,7 +159,7 @@
                         <ikw:SimpleStackPanel Spacing="4" Margin="0,0,24,24">
                             <ui:SettingsCard Header="主题色" IsEnabled="True">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="Color" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="Color" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <Button Content="选取颜色" MinWidth="108" HorizontalAlignment="Right"
                                         Style="{DynamicResource {x:Static ui:ThemeKeys.AccentButtonStyleKey}}"
@@ -164,7 +168,7 @@
 
                             <ui:SettingsCard Header="颜色主题" IsEnabled="True">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="DarkTheme" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="DarkTheme" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <ComboBox x:Name="ComboBoxTheme"
                                           HorizontalAlignment="Right"
@@ -193,12 +197,12 @@
                         <ikw:SimpleStackPanel Spacing="4" Margin="0,0,24,24">
                             <ui:SettingsExpander Header="墨迹栏" IsExpanded="True">
                                 <ui:SettingsExpander.HeaderIcon>
-                                    <ic:FluentIcon Icon="PanelBottom" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="PanelBottom" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsExpander.HeaderIcon>
                                 <ui:SettingsExpander.Items>
                             <ui:SettingsCard Header="显示文字注释">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="SlideText" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="SlideText" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <ui:ToggleSwitch x:Name="FloatBarTextToggle"
                                                  IsOn="{Binding Settings.IsEnableDisPlayFloatBarText, Mode=TwoWay}"
@@ -208,7 +212,7 @@
 
                             <ui:SettingsCard Header="缩放大小">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="ZoomIn" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="ZoomIn" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <DockPanel>
                                     <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="16"
@@ -225,7 +229,7 @@
 
                             <ui:SettingsCard Header="底部边距">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="PaddingDown" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="PaddingDown" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <DockPanel>
                                     <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="16"
@@ -243,7 +247,7 @@
 
                             <ui:SettingsCard Header="右侧边距">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="PaddingRight" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="PaddingRight" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <DockPanel>
                                     <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="16"
@@ -261,7 +265,7 @@
 
                             <ui:SettingsCard Header="不透明度">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="Blur" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="Blur" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <DockPanel>
                                     <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="16"
@@ -278,7 +282,7 @@
 
                             <ui:SettingsCard Header="显示背景色" Description="启用IC经典彩色渐变背景">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="ColorBackground" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="ColorBackground" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <ui:ToggleSwitch x:Name="ColorfulFloatingBarToggle"
                                                  IsOn="{Binding Settings.IsColorfulViewboxFloatingBar, Mode=TwoWay}"
@@ -290,7 +294,7 @@
 
                             <ui:SettingsCard Header="设置为默认PDF应用">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="DocumentCheckmark" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="DocumentCheckmark" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <Button Content="设置为默认" HorizontalAlignment="Right"
                                         Style="{DynamicResource {x:Static ui:ThemeKeys.AccentButtonStyleKey}}"
@@ -314,7 +318,7 @@
                         <ikw:SimpleStackPanel Spacing="4" Margin="0,0,24,24">
                             <ui:SettingsCard Header="缩放大小">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="ZoomIn" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="ZoomIn" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <DockPanel>
                                     <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="16"
@@ -331,13 +335,13 @@
 
                             <ui:SettingsCard Header="底部边距">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="PaddingDown" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="PaddingDown" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <DockPanel>
                                     <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="16"
                                                Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="12,0,0,0" MinWidth="40"
                                                TextAlignment="Right">
-                                        <Run x:Name="BlackboardBottomMarginValue" Text="0px"/>
+                                        <Run x:Name="BlackboardBottomMarginValue" Text="5px"/>
                                     </TextBlock>
                                     <Slider x:Name="BlackboardBottomMarginSlider"
                                             Minimum="0" Maximum="50" TickFrequency="1" IsSnapToTickEnabled="True"
@@ -349,7 +353,7 @@
 
                             <ui:SettingsCard Header="不透明度">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="Blur" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="Blur" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <DockPanel>
                                     <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="16"
@@ -382,7 +386,7 @@
                             <ui:SettingsCard Header="抬笔墨迹纠正"
                                              Description="当笔抬起时，应用将自动把该笔画纠正为标准图形，支持三角形、圆形、矩形、平行四边形等多种图形">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="PenSparkle" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="PenSparkle" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <ui:ToggleSwitch x:Name="InkToShapeToggle"
                                                  IsOn="{Binding Settings.IsInkToShapeEnabled, Mode=TwoWay}"
@@ -392,7 +396,7 @@
 
                             <ui:SettingsCard Header="抬笔墨迹纠正灵敏度">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="Options" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="Options" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <DockPanel>
                                     <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="16"
@@ -410,7 +414,7 @@
                             <ui:SettingsCard Header="停顿墨迹纠正"
                                              Description="在笔迹停顿一段时间后，应用将自动把该笔画纠正为标准图形，支持三角形、圆形、矩形、平行四边形等多种图形">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="PenOff" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="PenOff" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <ui:ToggleSwitch x:Name="PauseInkToShapeToggle"
                                                  IsOn="{Binding Settings.IsPauseInkToShapeEnabled, Mode=TwoWay}"
@@ -420,7 +424,7 @@
 
                             <ui:SettingsCard Header="停顿墨迹纠正灵敏度">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="Options" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="Options" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <DockPanel>
                                     <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="16"
@@ -437,7 +441,7 @@
 
                             <ui:SettingsCard Header="停顿触发墨迹纠正时间">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="Clock" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="Clock" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <DockPanel>
                                     <TextBlock DockPanel.Dock="Right" Text="ms" VerticalAlignment="Center" FontSize="16"
@@ -451,7 +455,7 @@
 
                             <ui:SettingsCard Header="停顿容错值">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="CalligraphyPenError" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="CalligraphyPenError" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <DockPanel>
                                     <TextBlock DockPanel.Dock="Right" Text="px" VerticalAlignment="Center" FontSize="16"
@@ -480,7 +484,7 @@
                         <ikw:SimpleStackPanel Spacing="4" Margin="0,0,24,24">
                             <ui:SettingsCard Header="手掌擦除" Description="当触摸面积达到阈值时，将自动切换为橡皮">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="HandLeft" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="HandLeft" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <ui:ToggleSwitch x:Name="PalmEraseToggle"
                                                  IsOn="{Binding Settings.IsPalmEraseEnabled, Mode=TwoWay}"
@@ -490,7 +494,7 @@
 
                             <ui:SettingsCard Header="笔尖模式" Description="减小手掌擦触摸面积阈值以更好地适配笔头擦除">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="Edit" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="Edit" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <ui:ToggleSwitch x:Name="NibModeToggle"
                                                  IsOn="{Binding Settings.IsNibModeEnabled, Mode=TwoWay}"
@@ -500,7 +504,7 @@
 
                             <ui:SettingsCard Header="手掌模式触摸阈值">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="SquareEraser" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="SquareEraser" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <DockPanel>
                                     <TextBlock DockPanel.Dock="Right" Text="px" VerticalAlignment="Center" FontSize="16"
@@ -514,7 +518,7 @@
 
                             <ui:SettingsCard Header="笔尖模式触摸阈值">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="SquareEraser" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="SquareEraser" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <DockPanel>
                                     <TextBlock DockPanel.Dock="Right" Text="px" VerticalAlignment="Center" FontSize="16"
@@ -544,7 +548,7 @@
                             <ui:SettingsCard Header="自动保存墨迹书写数据"
                                              Description="采用侧车存储，不修改原PDF文件，适合教学环境，后续会加直接保存PDF文件的存储功能">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="SaveArrowRight" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="SaveArrowRight" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <ui:ToggleSwitch x:Name="AutoSaveInkToggle"
                                                  IsOn="{Binding Settings.IsAutoSaveInk, Mode=TwoWay}"
@@ -555,7 +559,7 @@
                             <ui:SettingsCard Header="自动删除超过时间的墨迹书写数据"
                                              Description="在启动时自动删除超过指定时间的墨迹书写数据">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="DeleteLines" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="DeleteLines" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <ui:ToggleSwitch x:Name="AutoCleanInkToggle"
                                                  IsOn="{Binding Settings.IsAutoCleanInk, Mode=TwoWay}"
@@ -565,7 +569,7 @@
 
                             <ui:SettingsCard Header="自动删除墨迹书写数据时间">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="Clock" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="Clock" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <DockPanel>
                                     <TextBlock DockPanel.Dock="Right" Text="天" VerticalAlignment="Center" FontSize="16"
@@ -608,10 +612,13 @@
                                 <Run Text="•  "/><Hyperlink Tag="https://github.com/Eason-2012/InkCanvasForPDF" Click="AboutHyperlink_Click">本应用项目主页</Hyperlink>
                             </TextBlock>
                             <TextBlock FontSize="15" TextWrapping="Wrap" Foreground="{DynamicResource ToolbarForegroundBrush}">
-                                <Run Text="•  "/><Hyperlink Tag="https://github.com/Eason-2012/InkCanvasForPDF/issues/new" Click="AboutHyperlink_Click">向开发者报告问题</Hyperlink>
+                                <Run Text="•  "/><Hyperlink Click="ThirdPartyDeps_Click">第三方代码参考</Hyperlink>
                             </TextBlock>
                             <TextBlock FontSize="15" TextWrapping="Wrap" Foreground="{DynamicResource ToolbarForegroundBrush}">
-                                <Run Text="•  "/><Hyperlink Click="ThirdPartyDeps_Click">第三方代码参考</Hyperlink>
+                                <Run Text="•  "/><Hyperlink Click="OpenSourceLicense_Click">开放源代码许可</Hyperlink>
+                            </TextBlock>
+                            <TextBlock FontSize="15" TextWrapping="Wrap" Foreground="{DynamicResource ToolbarForegroundBrush}">
+                                <Run Text="•  "/><Hyperlink Tag="https://github.com/Eason-2012/InkCanvasForPDF/issues/new" Click="AboutHyperlink_Click">向开发者报告问题</Hyperlink>
                             </TextBlock>
                         </ikw:SimpleStackPanel>
                     </ScrollViewer>
@@ -665,7 +672,7 @@
                             <ui:SettingsCard Header="启用自动检查更新"
                                              Description="开启后，应用将在启动时自动检查并下载更新，退出应用时自动安装更新">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="ArrowSyncCircle" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="ArrowSyncCircle" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <ui:ToggleSwitch x:Name="AutoUpdateToggle"
                                                  IsOn="{Binding Settings.IsAutoCheckUpdate, Mode=TwoWay}"
@@ -675,7 +682,7 @@
 
                             <ui:SettingsCard Header="选择更新通道">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="Channel" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="Channel" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <ComboBox x:Name="UpdateChannelCombo"
                                           MinWidth="110"
@@ -689,7 +696,7 @@
                             <ui:SettingsCard Header="配置更新代理"
                                              Description="配置更新代理以更快速地连接到GitHub，留空则为裸连GitHub">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="Cloud" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="Cloud" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <TextBox x:Name="UpdateProxyBox"
                                          Width="240"
@@ -701,7 +708,7 @@
                                              IsEnabled="True" IsClickEnabled="True"
                                              Click="ViewChangelog_Click">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="History" IconVariant="Regular" IconSize="Resizable" FontSize="28"/>
+                                    <ic:FluentIcon Icon="History" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                             </ui:SettingsCard>
 

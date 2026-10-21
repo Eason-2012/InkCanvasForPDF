@@ -89,12 +89,24 @@ namespace InkCanvasForPDF.Board
         object lastMouseDownSender;
 
         /// <summary>长按保持选中（泛化）：按住 500ms 未松开即选中该图形（不限第一行）。
-        /// mode 取自父 Border 的 Tag；短按（500ms 内松开）不在此处理，交给 Image_MouseUp。</summary>
+        /// mode 取自父 Border 的 Tag；短按（500ms 内松开）不在此处理，交给 Image_MouseUp。
+        /// 右键单击等同长按：立即保持选中（不进计时、不写 lastMouseDownSender，松开时 MouseUp 直接忽略）。</summary>
         private async void Image_MouseDown(object sender, MouseButtonEventArgs e)
         {
             if (sender is not Image img
                 || LogicalTreeHelper.GetParent(img) is not Border { Tag: not null } b
                 || !int.TryParse(b.Tag.ToString(), out var mode)) return;
+
+            if (e.ChangedButton == MouseButton.Right)
+            {
+                isLongPressSelected = true;
+                SelectShape(mode, true);
+                // 长按保持选中提示：浮动通知（与 PDF 同款，3 秒自动关闭）
+                if (Window.GetWindow(this) is MainWindow tipmw)
+                    tipmw.ShowFloatingTip("已保持选中该图形");
+                e.Handled = true;
+                return;
+            }
 
             lastMouseDownSender = sender;
 

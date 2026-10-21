@@ -65,8 +65,8 @@ public partial class SettingsView : System.Windows.Controls.UserControl
                 // 已保存的笔锋样式回填下拉框，并按样式决定"时间笔锋长满时间"卡片可见性。
                 ComboBoxPenStyle.SelectedIndex = Math.Max(0, Array.IndexOf(PenStyleMap, Math.Clamp(vm.Settings.InkStyle, 0, 3)));
                 UpdateTimePenCardVisibility();
-                // 已保存的橡皮粗细 → 实际直径（1~20 ×4），保证橡皮光标与设置一致。
-                vm.InkTool.EraserSize = vm.Settings.EraserSizeSetting * 4.0;
+                // 已保存的橡皮粗细 → 实际直径（15 + 3.5x），保证橡皮光标与设置一致。
+                vm.InkTool.EraserSize = InkToolViewModel.EraserSizeFromSlider(vm.Settings.EraserSizeSetting);
                 // 外观页初始即按保存值同步浮动栏文字。
                 FloatBarTextChanged?.Invoke(vm.Settings.IsEnableDisPlayFloatBarText);
                 // 启动恢复：主题选择与两条墨迹栏缩放/透明度滑块（滑块值 = 设置 ×100；边距滑块由绑定自动同步）。
@@ -288,6 +288,54 @@ public partial class SettingsView : System.Windows.Controls.UserControl
         {
             App.Log("About.LoadDependencies", ex);
             return new List<(string Name, string Url)>();
+        }
+    }
+
+    /// <summary>开放源代码许可：读取编译进程序集的 LICENSE，在 iuwm ContentDialog 中滚动展示全文。</summary>
+    private async void OpenSourceLicense_Click(object sender, RoutedEventArgs e)
+    {
+        var text = LoadLicenseText();
+        var body = new TextBlock
+        {
+            Text = string.IsNullOrEmpty(text) ? "未找到许可证文本。" : text,
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+        };
+        body.SetResourceReference(TextBlock.ForegroundProperty, "ToolbarForegroundBrush");
+
+        var dialog = new ContentDialog
+        {
+            Title = "开放源代码许可",
+            Content = new ScrollViewer
+            {
+                Content = body,
+                MaxHeight = 420,
+                MaxWidth = 450,   // 收窄文字列：弹窗自适应到 ≈498px，避免被全文最长行撑宽产生右侧留白
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            },
+            CloseButtonText = "关闭",
+            Owner = Window.GetWindow(this) ?? Application.Current.MainWindow,
+        };
+        dialog.SetResourceReference(ContentDialog.CloseButtonStyleProperty,
+            iNKORE.UI.WPF.Modern.ThemeKeys.AccentButtonStyleKey);
+        await dialog.ShowAsync();
+    }
+
+    /// <summary>读取编译进程序集的 LICENSE 文本；缺资源/读取失败记日志并返回空串。</summary>
+    private static string LoadLicenseText()
+    {
+        try
+        {
+            var uri = new Uri("pack://application:,,,/LICENSE");
+            using var stream = Application.GetResourceStream(uri)!.Stream;
+            using var reader = new StreamReader(stream);
+            return reader.ReadToEnd();
+        }
+        catch (Exception ex)
+        {
+            App.Log("About.LoadLicense", ex);
+            return string.Empty;
         }
     }
 
@@ -684,13 +732,19 @@ public partial class SettingsView : System.Windows.Controls.UserControl
 
         if (UpdateService.State == UpdateState.ReadyToInstall)
         {
+            UpdateStateButton.IsEnabled = false;                // 关闭实例期间防重复点击
+            UpdateStateButton.Content = "正在关闭实例…";
             try
             {
-                UpdateService.StartInstall(UpdateService.GetSetupPath(), restart: true);
-                Application.Current.Shutdown();
+                UpdateService.ClaimInstall();                   // ① 接管：其他实例退出时不再自行启动安装器
+                await UpdateService.CloseOtherInstancesAsync(); // ② 优雅关闭全部其他实例并等待退出
+                UpdateService.StartInstall(UpdateService.GetSetupPath(), restart: true); // ③ 启动安装器
+                Application.Current.Shutdown();                 // ④ 退出本实例
             }
             catch (Exception ex)
             {
+                UpdateStateButton.IsEnabled = true;             // 失败回退：恢复按钮可再点
+                UpdateStateButton.Content = "立即更新";
                 App.Log("Update.StartInstall", ex);
                 ShowFloatingTipFromOwner("更新失败：" + ex.Message, InfoBarSeverity.Error);
             }

@@ -13,9 +13,9 @@ public class AppSettings
     [JsonPropertyName("isFitToCurve")]
     public bool IsFitToCurve { get; set; } = true;
 
-    /// <summary>墨迹纠正（InkToShape，抄 ICA Settings.InkToShape）；全局开关，PDF 墨迹栏与画板墨迹面板共享。</summary>
+    /// <summary>墨迹纠正（InkToShape，抄 ICA Settings.InkToShape）；全局开关，PDF 墨迹栏与画板墨迹面板共享。默认关闭（抬笔纠正）。</summary>
     [JsonPropertyName("isInkToShapeEnabled")]
-    public bool IsInkToShapeEnabled { get; set; } = true;
+    public bool IsInkToShapeEnabled { get; set; } = false;
 
     /// <summary>多指书写：true=允许多指同时在 PDF 上书写（停用第 2 指停墨抑制）；false=第 2 指停墨让位双指手势。</summary>
     [JsonPropertyName("isMultiFingerInkEnabled")]
@@ -25,9 +25,9 @@ public class AppSettings
     [JsonPropertyName("inkToShapeSensitivity")]
     public int InkToShapeSensitivity { get; set; } = 75;
 
-    /// <summary>停顿强制识别：书写中停顿超过设定时间即强制墨迹纠正；独立于 isInkToShapeEnabled。</summary>
+    /// <summary>停顿强制识别：书写中停顿超过设定时间即强制墨迹纠正；独立于 isInkToShapeEnabled。默认开启（停顿纠正）。</summary>
     [JsonPropertyName("isPauseInkToShapeEnabled")]
-    public bool IsPauseInkToShapeEnabled { get; set; } = false;
+    public bool IsPauseInkToShapeEnabled { get; set; } = true;
 
     /// <summary>停顿强制识别相似度门槛（0~100，直接作为百分比门槛；默认 75）。</summary>
     [JsonPropertyName("pauseInkToShapeSensitivity")]
@@ -61,7 +61,7 @@ public class AppSettings
     [JsonPropertyName("highlighterWidth")]
     public double HighlighterWidth { get; set; } = 5;
 
-    /// <summary>橡皮粗细滑块值（1~20，实际擦除直径 = 值 × 4 → 4~80）。</summary>
+    /// <summary>橡皮粗细滑块值（1~30，实际擦除直径 = 15 + 3.5 × 值 → 18.5~120）。</summary>
     [JsonPropertyName("eraserSizeSetting")]
     public int EraserSizeSetting { get; set; } = 10;
 
@@ -95,7 +95,7 @@ public class AppSettings
 
     /// <summary>时间笔锋墨迹点长满时间（ms，10~1000）：数字越大笔锋越明显；仅时间笔锋模式生效。</summary>
     [JsonPropertyName("timePenGrowMs")]
-    public int TimePenGrowMs { get; set; } = 50;
+    public int TimePenGrowMs { get; set; } = 100;
 
     /// <summary>批注画笔粗细（1~30）。</summary>
     [JsonPropertyName("inkWidth")]
@@ -153,9 +153,9 @@ public class AppSettings
     [JsonPropertyName("viewboxBlackboardScale")]
     public double BlackboardBarScale { get; set; } = 1.0;
 
-    /// <summary>黑板墨迹栏底部边距（px，默认 0 与原 XAML 硬编码一致）。</summary>
+    /// <summary>黑板墨迹栏底部边距（px，默认 5）。</summary>
     [JsonPropertyName("viewboxBlackboardBottomMargin")]
-    public double BlackboardBarBottomMargin { get; set; } = 0;
+    public double BlackboardBarBottomMargin { get; set; } = 5;
 
     // ══ 数据存储 ══
 

@@ -164,7 +164,7 @@ public sealed class InkToolViewModel : ViewModelBase
         }
     }
 
-    private double _eraserSize = 40;
+    private double _eraserSize = 50;
 
     /// <summary>面积擦直径（页面坐标，屏幕恒定尺寸需除以 DisplayScale，由代码后置处理）。</summary>
     public double EraserSize
@@ -172,6 +172,12 @@ public sealed class InkToolViewModel : ViewModelBase
         get => _eraserSize;
         set => SetField(ref _eraserSize, value);
     }
+
+    /// <summary>橡皮粗细滑块值(1~30) → 实际直径（15 + 3.5x，替代旧 ×4；滑块 1~30 → 18.5~120）。</summary>
+    public static double EraserSizeFromSlider(double sliderValue) => 15 + 3.5 * sliderValue;
+
+    /// <summary>实际直径 → 橡皮粗细滑块值(1~30)：反向换算并夹取有效范围。</summary>
+    public static double SliderFromEraserSize(double size) => Math.Clamp((size - 15) / 3.5, 1, 30);
 
     // ══════════ 墨迹选项（抄 Ink-Canvas MW_PenColors / MW_Settings，无 Settings 持久化）══════════
 
@@ -340,7 +346,7 @@ public sealed class InkToolViewModel : ViewModelBase
         set => SetField(ref _isMultiFingerInk, value);
     }
 
-    private bool _isInkToShapeEnabled = true;
+    private bool _isInkToShapeEnabled = false;
 
     /// <summary>墨迹纠正（抄 ICA Settings.InkToShape.IsInkToShapeEnabled）：全局开关，PDF 墨迹栏与画板墨迹面板共享同一个值。</summary>
     public bool IsInkToShapeEnabled
@@ -376,6 +382,7 @@ public sealed class InkToolViewModel : ViewModelBase
             var c = HighlighterColorMap[InkColor];
             da.Color = Color.FromArgb(InkAlpha, c.R, c.G, c.B);
             da.IsHighlighter = true;
+            da.IgnorePressure = true;   // 荧光笔屏蔽压感（等粗绘制）
             da.Width = (30 + InkWidth * 2) / scale;   // 对齐 ICA：实际宽 = 30 + 滑块值（滑块值 = InkWidth）
             da.Height = (30 + InkWidth * 2) / scale;
         }
@@ -383,6 +390,7 @@ public sealed class InkToolViewModel : ViewModelBase
         {
             da.Color = (IsUselightThemeColor ? PenLightColorMap : PenDarkColorMap)[InkColor];
             da.IsHighlighter = false;
+            da.IgnorePressure = false;  // Clone 会带走上一次荧光笔的值，复位为 WPF 默认（跟随压感）
             da.Width = InkWidth / 2 / scale;
             da.Height = InkWidth / 2 / scale;
         }

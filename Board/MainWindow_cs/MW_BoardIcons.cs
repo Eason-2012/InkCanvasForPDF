@@ -3,6 +3,7 @@
 using InkCanvasForPDF.Board.Helpers;
 using InkCanvasForPDF.Controls;
 using InkCanvasForPDF.Services;
+using InkCanvasForPDF.ViewModels;
 using System;
 using System.Windows;
 using System.Windows.Controls;
@@ -77,12 +78,12 @@ namespace InkCanvasForPDF.Board
                 // 面板跟随画板栏缩放档（Popup 不在 Viewbox 内，需自行应用；不套 PDF 的 0.65）
                 BoardEraserPaletteRoot.LayoutTransform = new ScaleTransform(_boardBarScale, _boardBarScale);
                 BoardEraserPalette.PlacementTarget = BoardEraser;
-                // 打开前回填 UI：Pivot 页签（持久化的面积擦/墨迹擦）、粗细滑块（值=EraserSize/4）、
+                // 打开前回填 UI：Pivot 页签（持久化的面积擦/墨迹擦）、粗细滑块（值=SliderFromEraserSize(EraserSize)）、
                 // 手掌擦除/笔尖模式开关（PDF 橡皮菜单共用同一设置，两侧一致）
                 if (Vm is { } vm)
                 {
                     BoardPivotEraser.SelectedIndex = vm.InkTool.IsStrokeEraser ? 1 : 0;
-                    BoardEraserSizeSlider.Value = vm.InkTool.EraserSize / 4;
+                    BoardEraserSizeSlider.Value = InkToolViewModel.SliderFromEraserSize(vm.InkTool.EraserSize);
                     _syncingBoardEraserToggles = true;
                     BoardToggleSwitchPalmEraseArea.IsOn = BoardToggleSwitchPalmEraseStroke.IsOn = vm.Settings.IsPalmEraseEnabled;
                     BoardToggleSwitchNibModeArea.IsOn = BoardToggleSwitchNibModeStroke.IsOn = vm.Settings.IsNibModeEnabled;
@@ -99,7 +100,7 @@ namespace InkCanvasForPDF.Board
         }
 
         /// <summary>按当前模式（forcePointEraser：true=面积擦，false=墨迹擦）建立橡皮 EraserShape/EditingMode。
-        /// 直径取 InkCanvasForPDF 设置（EraserSizeSetting × 4，由 MainWindow 注入），与 PDF 批注侧一致；黑板擦 38:56 矩形。</summary>
+        /// 直径取 InkCanvasForPDF 设置（EraserSizeSetting 经 15+3.5x 换算，由 MainWindow 注入），与 PDF 批注侧一致；黑板擦 38:56 矩形。</summary>
         private void ApplyBoardEraserMode()
         {
             forceEraser = true;
@@ -137,12 +138,12 @@ namespace InkCanvasForPDF.Board
                 ApplyBoardEraserMode();     // 未激活（Loaded 回填页签）不应用，避免误切画布模式
         }
 
-        /// <summary>橡皮粗细滑块（1-20 对齐设置页）→ 实际 EraserSize=值×4（MainWindow 监听统一刷两侧 EraserShape/光标/画板直径），
+        /// <summary>橡皮粗细滑块（1-30）→ 实际 EraserSize=15+3.5x（MainWindow 监听统一刷两侧 EraserShape/光标/画板直径），
         /// 并回写 EraserSizeSetting 持久化（同值守卫：菜单打开回填滑块不重复存盘）。</summary>
         private void BoardEraserSizeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
             if (Vm is not { } vm) return;
-            vm.InkTool.EraserSize = e.NewValue * 4;
+            vm.InkTool.EraserSize = InkToolViewModel.EraserSizeFromSlider(e.NewValue);
             if (vm.Settings.EraserSizeSetting != (int)e.NewValue)
             {
                 vm.Settings.EraserSizeSetting = (int)e.NewValue;

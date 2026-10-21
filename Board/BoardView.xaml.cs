@@ -23,9 +23,9 @@ namespace InkCanvasForPDF.Board
         /// <summary>请求退出画板（ImageBlackboard_Click 触发，由 MainWindow 订阅退出画板模式）。</summary>
         public event EventHandler? ExitRequested;
 
-        /// <summary>橡皮直径（DIP）：由 MainWindow 从 InkCanvasForPDF 设置（EraserSizeSetting × 4）注入，
+        /// <summary>橡皮直径（DIP）：由 MainWindow 从 InkCanvasForPDF 设置（EraserSizeSetting 经 15+3.5x 换算）注入，
         /// 替代 ICA 的 EraserSize 0~4 档 × 90，使画板与 PDF 批注的橡皮粗细一致。</summary>
-        public static double EraserDiameter { get; set; } = 40;
+        public static double EraserDiameter { get; set; } = 50;
 
         public BoardView()
         {
@@ -107,8 +107,9 @@ namespace InkCanvasForPDF.Board
             boardInkType = Math.Clamp(Settings.Canvas.LastPenKind, 0, 1);
             BoardPivotInk.SelectedIndex = boardInkType;
             isLoaded = true;
-            // 多指书写运行时接线（事件订阅 + isInMultiTouchMode）按保存值重建
-            if (Settings.Gesture.IsEnableMultiTouchMode)
+            // 多指书写运行时接线（事件订阅 + isInMultiTouchMode）按保存值重建；
+            // !isInMultiTouchMode 幂等守卫：防回填/其它路径已启用后被翻转语义重复 toggle 关掉
+            if (Settings.Gesture.IsEnableMultiTouchMode && !isInMultiTouchMode)
                 BorderMultiTouchMode_MouseUp(null, null);
             CheckEnableTwoFingerGestureBtnColorPrompt();   // ICA MW_SettingsToLoad.cs:404 同款调用
 
@@ -344,6 +345,14 @@ namespace InkCanvasForPDF.Board
             }
         }
 
+        /// <summary>橡皮粗细变化时按 EraserDiameter 重建面积擦 EraserShape（光标由 ApplyEraserCursor 同步；
+        /// 仅面积擦激活时应用，墨迹擦保持 5×5，与 EraserIcon_Click / ApplyBoardEraserMode 同款 38:56 黑板擦矩形）。</summary>
+        public void ApplyEraserShape()
+        {
+            if (forcePointEraser && inkCanvas.EditingMode == InkCanvasEditingMode.EraseByPoint)
+                inkCanvas.EraserShape = new RectangleStylusShape(EraserDiameter, InkCircleCursor.EraserBoardHeight(EraserDiameter));
+        }
+
         /// <summary>墨迹平滑（FitToCurve，主设置 isFitToCurve；由 MainWindow 注入，作用于新笔画）。</summary>
         public void ApplyFitToCurve(bool fitToCurve) =>
             inkCanvas.DefaultDrawingAttributes.FitToCurve = fitToCurve;
@@ -358,7 +367,7 @@ namespace InkCanvasForPDF.Board
         }
 
         /// <summary>时间笔锋墨迹点长满时间（ms）：与 PDF 批注侧共享同一设置，由 MainWindow 注入。</summary>
-        public double TimePenGrowMs { get; set; } = 50.0;
+        public double TimePenGrowMs { get; set; } = 100.0;
 
         /// <summary>注入长满时间并即时同步控制器（MainWindow 在启动与设置变更时调用）。</summary>
         public void ApplyTimePenGrowMs(double ms)

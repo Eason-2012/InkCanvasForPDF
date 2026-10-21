@@ -33,6 +33,12 @@ public partial class MainWindow : Window
     // 触摸计数 + 墨迹抑制（改动B）：非鼠标状态（IsInkMode）下第二指落下即停墨，让双指走平移/缩放
     private readonly HashSet<int> _pdfActiveTouchIds = new();   // PDF 视图当前按下的触摸 id
     private bool _inkGestureSuppressed;                          // 双指手势期间已压低墨迹
+    // 触摸平移/缩放全部由本类接管（PanningMode=None）：ScrollViewer 内置平移不看手指数，单指会抢书写，
+    // 且换指瞬间质心跳变会把一帧大位移一次性吃进去 → 视图突跳；改为按手指数门控 + 实时质心锚点。
+    private readonly Dictionary<int, Point> _pdfTouchPoints = new();   // 活动手指在 PagesScrollViewer 坐标系的位置（算实时质心）
+    private bool _pdfTouchSetChanged;   // 本帧手指集合发生变化（加/抬指）→ 跳过一帧，防质心/平移量突变跳视图
+    private bool _pdfPanAllowed;        // 本手势已由本类接管平移（供惯性判定；手指全抬后计数已清零，必须另存）
+    private const double PanInertiaDeceleration = 0.00096;   // 双指平移甩动惯性减速度（DIP/ms²，WPF 惯例值 10×96/1e6：约 1 DIP/ms 初速 ~1s 停下）
     private readonly Dictionary<InkCanvas, Binding> _suppressedEditingBindings = new();   // 抑制前保存的 EditingMode 绑定（恢复时接回）
     private bool _wasHidden;          // 窗口曾最小化：恢复前台时用多帧 Opacity 遮罩掩盖位图纹理重传白闪
     private EventHandler? _restoreFrameHandler;   // 多帧遮罩的渲染帧订阅
@@ -58,6 +64,7 @@ public partial class MainWindow : Window
     private readonly List<InkCanvas> _pageInkCanvases = new();                              // 页面画布（切橡皮时统一设置 EraserShape，保证黑板擦指针首显）
     private readonly HashSet<InkCanvas> _palmEraseCanvases = new();                          // 正在做手掌擦除的页面画布（面积擦历史需走平铺累加器，抬手统一恢复绑定）
     private readonly Dictionary<InkCanvas, PauseInkToShapeTracker> _pauseTrackers = new();   // 停顿强制识别追踪器（每页画布一个；Unloaded 时释放）
+    private readonly Dictionary<PageInkCanvas, Action<Stroke, int>> _selfDrawHandlers = new();   // 时间笔锋自绘笔画提交处理程序（Unloaded 时退订）
     // ══ 墨迹持久化：标脏 + 300ms 去抖（D2/D3/D4）══
     private readonly HashSet<int> _dirtyPdfPages = new();                 // 待写 PDF 页号（0-based）
     private bool _dirtyBoardInk;                                          // 画板画布待写
@@ -267,8 +274,9 @@ public partial class MainWindow : Window
                 RestartInkSaveTimer();
             }
         };
-        // 触摸手势（对齐 KillerPDF）：handledEventsToo=true——ScrollViewer 自身平移会标记 Manipulation
-        // 事件已处理，普通订阅会被吞掉；这样双指捏合永远可达，单指平移惯性仍由 ScrollViewer 提供。
+        // 触摸手势（对齐 KillerPDF）：handledEventsToo=true——祖先/内建元素可能先标记 Manipulation
+        // 事件已处理，普通订阅会被吞掉。ScrollViewer 内置触摸平移已关（PanningMode=None），
+        // 平移/缩放/惯性全部在下面这套处理器里按手指数门控自行实现。
         PagesScrollViewer.AddHandler(ManipulationStartingEvent,
             new EventHandler<ManipulationStartingEventArgs>(PagesControl_ManipulationStarting), true);
         PagesScrollViewer.AddHandler(ManipulationDeltaEvent,
@@ -279,8 +287,11 @@ public partial class MainWindow : Window
             new EventHandler<ManipulationCompletedEventArgs>(PagesControl_ManipulationCompleted), true);
         // 触摸计数（Preview 隧道必经 ScrollViewer，InkCanvas 捕获触摸时也能收到；handledEventsToo 防被吞）：
         // 非鼠标状态第二指落下 → 停墨进入双指手势，抬完所有指恢复（改动B）。
+        // Move 同挂一条：记录各指实时位置，缩放锚点取当前多指质心（而非手势起点 ManipulationOrigin）。
         PagesScrollViewer.AddHandler(UIElement.PreviewTouchDownEvent,
             new EventHandler<TouchEventArgs>(PdfView_PreviewTouchDown), true);
+        PagesScrollViewer.AddHandler(UIElement.PreviewTouchMoveEvent,
+            new EventHandler<TouchEventArgs>(PdfView_PreviewTouchMove), true);
         PagesScrollViewer.AddHandler(UIElement.PreviewTouchUpEvent,
             new EventHandler<TouchEventArgs>(PdfView_PreviewTouchUp), true);
         // 缩放（整层 ScaleTransform）变化时同步给墨迹工具：画笔粗细按 DisplayScale 抵消，保证"粗细"设几屏幕就是几。
@@ -344,7 +355,12 @@ public partial class MainWindow : Window
                 }
             }
             else if (e.PropertyName == nameof(InkToolViewModel.EraserSize))
+            {
                 UpdateEraserShapes();
+                // 画板面积擦 EraserShape 随滑块同步（先更新直径再应用，保证读到新值；光标由下方 ApplyEraserCursor 刷）
+                BoardView.EraserDiameter = _viewModel.InkTool.EraserSize;
+                Board.ApplyEraserShape();
+            }
             // 选形状/退出形状时确定性同步所有页面画布 EditingMode（不依赖绑定时序，防个别页脱钩残留）
             else if (e.PropertyName == nameof(InkToolViewModel.ShapeDrawMode))
                 SyncPageEditingModes();
@@ -819,22 +835,49 @@ public partial class MainWindow : Window
         tb.CaretIndex = tb.Text?.Length ?? 0;      // 光标放到文本末尾
     }
 
-    /// <summary>触摸手势开始：平移交给 ScrollViewer 内置触摸平移，双指缩放由本类处理。</summary>
+    /// <summary>触摸手势开始：平移/缩放/惯性全部由本类接管（ScrollViewer PanningMode=None），
+    /// 是否可用由 IsPdfGestureAllowed 按「工具模式 × 手指数 × 多指书写」门控。</summary>
     private void PagesControl_ManipulationStarting(object? sender, ManipulationStartingEventArgs e)
     {
         _isTouchZooming = false;
         _touchGesture = TouchGestureKind.Undecided;   // 每次手势重新判定 pan/zoom（改动A）
+        _pdfPanAllowed = false;                       // 新一笔手势：未接管过平移前不得惯性
         e.ManipulationContainer = PagesScrollViewer;
         e.Mode = ManipulationModes.TranslateX | ManipulationModes.TranslateY | ManipulationModes.Scale;
     }
 
-    /// <summary>双指缩放：以捏合中心为锚点做倍率缩放 + 偏移补偿（与 Ctrl+滚轮同一套同步补偿逻辑）。
-    /// 手势类型按累计量锁存（改动A）：明显捏合→Zoom 由本类处理；明显平移→Pan 全程交给 ScrollViewer
-    /// （不设 Handled，平移惯性随之可用）；未达阈值前不缩放，避免单帧抖动误判。</summary>
+    /// <summary>平移 + 双指缩放，统一补偿公式 offset' = (offset + v − t) × ratio − v
+    /// （v = 当前多指质心，t = 本帧质心平移量，ratio = 本帧缩放倍率，纯平移时 = 1）：
+    /// ratio=1 化简为 offset−t（内容跟手），t=0 化简为以 v 为中心缩放，且纯平移帧质心跳变在式中自然抵消。
+    /// 手势类型按累计量锁存（改动A）：只决定本帧是否缩放、抬指后是否允许惯性；平移不再交给 ScrollViewer。</summary>
     private void PagesControl_ManipulationDelta(object? sender, ManipulationDeltaEventArgs e)
     {
         // 有页面选区遮罩可见时双指让位给选区变换（ICA 选择语义：双指=移动/旋转/缩放选区），不触发捏合缩放
         if (IsAnySelectionCoverVisible)
+            return;
+
+        // 惯性阶段（手指已全抬，InertiaStarting 未被掐才会有）：只按甩动位移滚动，不进门/不取质心/不缩放
+        if (e.IsInertial)
+        {
+            var inertiaSv = _pdfScrollViewer;
+            if (inertiaSv == null)
+                return;
+            e.Handled = true;
+            System.Windows.Vector inertiaT = e.DeltaManipulation.Translation;
+            inertiaSv.ScrollToHorizontalOffset(inertiaSv.HorizontalOffset - inertiaT.X);
+            inertiaSv.ScrollToVerticalOffset(inertiaSv.VerticalOffset - inertiaT.Y);
+            return;
+        }
+
+        // 加/抬指的那一帧不应用任何平移/缩放：换指瞬间质心与平移量会突变，应用即视图突跳（跳左上角的直接防线）
+        if (_pdfTouchSetChanged)
+        {
+            _pdfTouchSetChanged = false;
+            return;
+        }
+
+        // 手指数/多指书写门：批注模式单指、多指书写开启时整帧不介入（内置平移已关 → 墨迹照常，页面不动）
+        if (!IsPdfGestureAllowed)
             return;
 
         // 手势锁存判定（累计量，非单帧增量）
@@ -846,63 +889,100 @@ public partial class MainWindow : Window
                 _touchGesture = TouchGestureKind.Zoom;
             else if (cumTranslation.Length >= 20)
                 _touchGesture = TouchGestureKind.Pan;
-            else
-                return;   // 未决：不缩放、不设 Handled，ScrollViewer 照常平移
+            // 未决：不缩放（ratio=1），但平移照常由本类应用
         }
-        if (_touchGesture == TouchGestureKind.Pan)
-            return;   // 平移手势全程交给 ScrollViewer（含惯性），本类不介入
-
-        double scale = e.DeltaManipulation.Scale.X;
-        if (Math.Abs(scale - 1.0) <= 0.005)
-            return;
-
-        _isTouchZooming = true;
-        e.Handled = true;   // 捏合期间由本类处理缩放，阻止 ScrollViewer 同时平移
 
         var sv = _pdfScrollViewer;
         if (sv == null)
         {
-            _viewModel.ZoomBy(scale);
+            if (_touchGesture == TouchGestureKind.Zoom)
+                _viewModel.ZoomBy(e.DeltaManipulation.Scale.X);   // 无 ScrollViewer：只改缩放，不平移
             return;
         }
 
-        double oldZoom = _viewModel.ZoomLevel;
-        System.Windows.Point pos = PagesScrollViewer.TranslatePoint(e.ManipulationOrigin, sv);
-        double oldOffsetX = sv.HorizontalOffset;
+        System.Windows.Vector t = e.DeltaManipulation.Translation;
+        double oldOffsetX = sv.HorizontalOffset;   // 布局未变时读取（ZoomBy 只改 ZoomLevel，不动 offset）
         double oldOffsetY = sv.VerticalOffset;
 
-        // 已在 clamp 边界（ZoomLevel 未变化）：跳过布局与补偿，避免无效重排。
-        if (!_viewModel.ZoomBy(scale))
-            return;
-        double ratio = _viewModel.ZoomLevel / oldZoom;
+        double ratio = 1.0;
+        if (_touchGesture == TouchGestureKind.Zoom)
+        {
+            double scale = e.DeltaManipulation.Scale.X;
+            if (Math.Abs(scale - 1.0) > 0.005)
+            {
+                _isTouchZooming = true;
+                double oldZoom = _viewModel.ZoomLevel;
+                // 已在 clamp 边界（ZoomLevel 未变化）：ratio 保持 1，只平移不缩放，避免无效重排。
+                if (_viewModel.ZoomBy(scale))
+                    ratio = _viewModel.ZoomLevel / oldZoom;
+            }
+        }
 
-        sv.UpdateLayout();
-        sv.ScrollToHorizontalOffset((oldOffsetX + pos.X) * ratio - pos.X);
-        sv.ScrollToVerticalOffset((oldOffsetY + pos.Y) * ratio - pos.Y);
+        _pdfPanAllowed = true;   // 本手势已由本类接管平移 → 抬指后可走甩动惯性
+        e.Handled = true;
+
+        // 锚点 = 当前实时多指质心（跟踪缺失时回退 WPF 手势起点）；ratio=1 时 v 在式中约掉，平移不受锚点影响
+        System.Windows.Point pos = CurrentTouchCentroid() ?? PagesScrollViewer.TranslatePoint(e.ManipulationOrigin, sv);
+
+        if (ratio != 1.0)
+            sv.UpdateLayout();   // 只有缩放才需要先跑布局（沿用同帧防闪思路）
+        sv.ScrollToHorizontalOffset((oldOffsetX + pos.X - t.X) * ratio - pos.X);
+        sv.ScrollToVerticalOffset((oldOffsetY + pos.Y - t.Y) * ratio - pos.Y);
     }
 
-    /// <summary>缩放手势掐掉惯性（缩放不要惯性）；平移手势不设 Handled → ScrollViewer 内置平移惯性生效。</summary>
+    /// <summary>惯性起点：缩放手势、或本手势未接管过平移（批注模式单指等）一律无惯性；
+    /// 平移手势给定甩动减速度，惯性阶段的滚动由 PagesControl_ManipulationDelta 的 IsInertial 分支落地
+    /// （WPF 惯性位移走 ManipulationDelta(IsInertial=true)，无独立事件）。</summary>
     private void PagesControl_ManipulationInertiaStarting(object? sender, ManipulationInertiaStartingEventArgs e)
     {
-        if (_touchGesture == TouchGestureKind.Zoom || _isTouchZooming)
+        if (_touchGesture == TouchGestureKind.Zoom || _isTouchZooming || !_pdfPanAllowed)
+        {
             e.Handled = true;
+            return;
+        }
+        if (e.TranslationBehavior != null)
+            e.TranslationBehavior.DesiredDeceleration = PanInertiaDeceleration;
     }
 
     private void PagesControl_ManipulationCompleted(object? sender, ManipulationCompletedEventArgs e)
     {
         _isTouchZooming = false;
         _touchGesture = TouchGestureKind.Undecided;
+        _pdfPanAllowed = false;
     }
 
     // ══════════ 双指手势：触摸计数 + 非鼠标状态墨迹抑制（改动B）══════════
 
-    /// <summary>第二指落下：非鼠标状态（笔/橡皮/形状/无选区的选择）停墨，让双指走 ScrollViewer 平移 + 捏合缩放。
+    /// <summary>是否允许本帧 PDF 触摸手势（平移/缩放）：鼠标模式（非 IsInkMode）任何手指数都允许——它就是用来移动页面的；
+    /// 批注模式（笔/橡皮/选择/形状）要求 ≥2 指且「多指书写」未开——单指必须留给书写/擦除/选择。
+    /// 手指数与停墨逻辑同源（_pdfActiveTouchIds，IsPalmTouch 手掌不计入）。</summary>
+    private bool IsPdfGestureAllowed =>
+        !_viewModel.InkTool.IsInkMode
+        || (!_viewModel.InkTool.IsMultiFingerInk && _pdfActiveTouchIds.Count >= 2);
+
+    /// <summary>当前活动手指的实时质心（PagesScrollViewer 视口坐标，缩放锚点用）；无跟踪点时返回 null。</summary>
+    private System.Windows.Point? CurrentTouchCentroid()
+    {
+        if (_pdfTouchPoints.Count == 0)
+            return null;
+        double sx = 0, sy = 0;
+        foreach (var p in _pdfTouchPoints.Values)
+        {
+            sx += p.X;
+            sy += p.Y;
+        }
+        return new System.Windows.Point(sx / _pdfTouchPoints.Count, sy / _pdfTouchPoints.Count);
+    }
+
+    /// <summary>第二指落下：非鼠标状态（笔/橡皮/形状/无选区的选择）停墨，让双指走本类接管的平移 + 捏合缩放。
     /// 选区遮罩可见时不抑制——双指继续变换选区（ICA 语义）。</summary>
     private void PdfView_PreviewTouchDown(object? sender, TouchEventArgs e)
     {
         if (IsPalmTouch(e))
             return;   // 手掌擦除：手掌接触不计入第 2 指（否则会误触发停墨），也不进 _pdfActiveTouchIds
         _pdfActiveTouchIds.Add(e.TouchDevice.Id);
+        _pdfTouchPoints[e.TouchDevice.Id] = e.TouchDevice.GetTouchPoint(PagesScrollViewer).Position;   // 位置跟踪：缩放锚点取实时质心
+        _pdfTouchSetChanged = true;   // 换指帧：本帧不应用平移/缩放，防质心/平移量突变跳视图
         if (_viewModel.InkTool.IsMultiFingerInk)
             return;   // 多指书写开：不做第 2 指停墨，各指同时落笔成墨
         if (_pdfActiveTouchIds.Count < 2 || _inkGestureSuppressed)
@@ -928,10 +1008,21 @@ public partial class MainWindow : Window
         _inkGestureSuppressed = true;
     }
 
+    /// <summary>实时手指位置跟踪（缩放锚点=当前质心）：Preview 隧道 + handledEventsToo，InkCanvas 捕获触摸也能收到。</summary>
+    private void PdfView_PreviewTouchMove(object? sender, TouchEventArgs e)
+    {
+        if (_pdfTouchPoints.ContainsKey(e.TouchDevice.Id))
+            _pdfTouchPoints[e.TouchDevice.Id] = e.TouchDevice.GetTouchPoint(PagesScrollViewer).Position;
+    }
+
     /// <summary>抬指：触摸数归零才恢复墨迹（中途抬一指不恢复，防残留手指误画）。</summary>
     private void PdfView_PreviewTouchUp(object? sender, TouchEventArgs e)
     {
-        _pdfActiveTouchIds.Remove(e.TouchDevice.Id);
+        if (_pdfActiveTouchIds.Remove(e.TouchDevice.Id))
+        {
+            _pdfTouchPoints.Remove(e.TouchDevice.Id);   // 位置跟踪同步
+            _pdfTouchSetChanged = true;                 // 换指帧：本帧不应用平移/缩放，防质心/平移量突变跳视图
+        }
         if (_pdfActiveTouchIds.Count != 0 || !_inkGestureSuppressed)
             return;
 
@@ -1113,6 +1204,12 @@ public partial class MainWindow : Window
         {
             if (pageCanvas.Controller.Overlay.Parent is null && inkCanvas.Parent is Panel host)
                 host.Children.Add(pageCanvas.Controller.Overlay);
+            // 自绘笔画提交（多指副设备 / 硬笔屏蔽模式）：Loaded 可能多次触发，先退后挂防重复订阅
+            if (_selfDrawHandlers.Remove(pageCanvas, out var oldHandler))
+                pageCanvas.Controller.StrokeReady -= oldHandler;
+            Action<Stroke, int> selfDrawHandler = (stroke, deviceId) => CommitSelfDrawnStroke(pageCanvas, stroke, deviceId);
+            _selfDrawHandlers[pageCanvas] = selfDrawHandler;
+            pageCanvas.Controller.StrokeReady += selfDrawHandler;
             RefreshTimePressureArmed();
         }
 
@@ -1146,11 +1243,13 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>停顿强制识别触发门（PDF 宿主）：画笔工具、非荧光笔、非形状模式、内建墨迹模式。</summary>
+    /// <summary>停顿强制识别触发门（PDF 宿主）：画笔工具、非荧光笔、非形状模式、内建墨迹模式。
+    /// 多指书写开启时停用（对齐画板多触摸模式：断笔切 EditingMode 会丢多指湿墨）。</summary>
     private bool CanPauseTriggerPdf(InkCanvas canvas)
         => _viewModel.InkTool.ActiveTool == InkToolMode.Pen
            && !_viewModel.InkTool.DrawingAttributes.IsHighlighter
            && _viewModel.InkTool.ShapeDrawMode == 0
+           && !_viewModel.InkTool.IsMultiFingerInk
            && canvas.EditingMode == InkCanvasEditingMode.Ink;
 
     /// <summary>停顿强制识别·试识别（PDF 宿主）：用在绘点集构建的临时笔画（不入画布）先判定，
@@ -1228,6 +1327,9 @@ public partial class MainWindow : Window
             StrokeManipulationHistory = null;
         }
         pageCanvas.Controller.AbortStroke();
+        // 自绘笔画提交处理程序退订（控制器随画布重建时防旧页处理器残留）
+        if (_selfDrawHandlers.Remove(pageCanvas, out var selfDrawHandler))
+            pageCanvas.Controller.StrokeReady -= selfDrawHandler;
         if (pageCanvas.Controller.Overlay.Parent is Panel host)
             host.Children.Remove(pageCanvas.Controller.Overlay);
         // 手掌擦除：画布卸载即解除订阅；若卸载时正处在手掌擦除中，把 EditingMode 绑定还原，防绑定丢失
@@ -1238,6 +1340,7 @@ public partial class MainWindow : Window
             var binding = BindingOperations.GetBindingExpression(pageCanvas, modeProperty);
             if (binding != null)
                 BindingOperations.SetBinding(pageCanvas, modeProperty, binding.ParentBinding);
+            UpdateInkCursor();   // 手掌擦除中的画布卸载：光标按当前工具恢复（归零→笔光标）
         }
         // 停顿强制识别追踪器随页面释放（新文档重建容器时防定时器与事件订阅泄漏）
         if (_pauseTrackers.Remove(pageCanvas, out var tracker))
@@ -1254,6 +1357,18 @@ public partial class MainWindow : Window
                      && _viewModel.InkTool.ActiveTool == InkToolMode.Pen
                      && !_viewModel.InkTool.DrawingAttributes.IsHighlighter
                      && _viewModel.InkTool.ShapeDrawMode == 0;
+        // 屏蔽模式（0/1 笔锋 + 硬笔）：屏蔽默认湿墨、叠加层等宽自绘（与时间笔锋互斥，依 InkStyle 分流）
+        bool shield = _viewModel.InkTool.InkStyle is 0 or 1
+                      && !_viewModel.InkTool.PressureEnabled
+                      && _viewModel.InkTool.ActiveTool == InkToolMode.Pen
+                      && !_viewModel.InkTool.DrawingAttributes.IsHighlighter
+                      && _viewModel.InkTool.ShapeDrawMode == 0;
+        // 关闭笔锋（InkStyle=2）+ 硬笔：等宽交 WPF 渲染层开关 IgnorePressure（不再抬笔归一）；
+        // 荧光笔豁免（不参与笔锋/归一路径），软笔恒 false（真压感照旧）。
+        bool ignore2 = _viewModel.InkTool.InkStyle == 2
+                       && !_viewModel.InkTool.PressureEnabled
+                       && !_viewModel.InkTool.DrawingAttributes.IsHighlighter;
+        _viewModel.InkTool.DrawingAttributes.IgnorePressure = ignore2;   // 放循环前：ApplyCurrentColor 以 Clone 重建，克隆链继承
         foreach (var canvas in _pageInkCanvases)
         {
             if (canvas is not PageInkCanvas pageCanvas)
@@ -1262,6 +1377,11 @@ public partial class MainWindow : Window
             pageCanvas.Controller.PressureEnabled = _viewModel.InkTool.PressureEnabled;
             pageCanvas.Controller.GrowMs = _viewModel.Settings.TimePenGrowMs;
             pageCanvas.Controller.SetCollectArmed(armed);
+            pageCanvas.Controller.SetShieldArmed(shield);
+            // 多指书写：副设备由叠加层自绘（主设备仍走原生管线，保持原生命中湿墨/收笔路径不变）
+            pageCanvas.Controller.MultiDeviceEnabled = _viewModel.InkTool.IsMultiFingerInk;
+            pageCanvas.Controller.SelfDrawAllDevices = false;
+            pageCanvas.DefaultDrawingAttributes.IgnorePressure = ignore2;   // 各页共享 VM DA 实例，幂等直改（对齐 ApplyEraserShapeForMode 写法）
         }
     }
 
@@ -1294,9 +1414,10 @@ public partial class MainWindow : Window
     private void UpdateInkCursor()
     {
         var tool = _viewModel.InkTool.ActiveTool;
-        // 面积擦才用黑板擦自定义光标（尺寸=擦除洞）；墨迹擦参考 ICA：不设任何自定义光标，
+        // 面积擦与手掌擦除中都用黑板擦自定义光标（尺寸=擦除洞）；墨迹擦参考 ICA：不设任何自定义光标，
         // 落入下方 else 还原 XAML 默认（Cursor="Pen" + ForceCursor=false，与 ICA 擦除模式配置一致）
-        bool customEraser = tool == InkToolMode.Eraser && !_viewModel.InkTool.IsStrokeEraser;
+        bool palmErasing = _palmEraseCanvases.Count > 0;
+        bool customEraser = palmErasing || (tool == InkToolMode.Eraser && !_viewModel.InkTool.IsStrokeEraser);
         double diameter;
         if (customEraser)
         {
@@ -1383,6 +1504,14 @@ public partial class MainWindow : Window
     // 仅处理"无硬件压力"的输入（鼠标/手指所有点压力恒 0.5）；真压感笔保留原样，荧光笔不参与。
     // InkStyle：0=点集笔锋（收笔出锋），1=速率笔锋（快细慢粗），2=关闭笔锋，3=时间笔锋（落笔 250ms 内实时变粗）。
 
+    /// <summary>时间笔锋自绘笔画提交（多指副设备 / 硬笔屏蔽模式）：先入集合（触发撤销与脏页标记），
+    /// 再走与原生收笔同一套处理（冻结/笔锋/墨迹纠正）。控制器在此之后自行清场。</summary>
+    private void CommitSelfDrawnStroke(PageInkCanvas canvas, Stroke stroke, int deviceId)
+    {
+        canvas.Strokes.Add(stroke);
+        PageInkCanvas_StrokeCollected(canvas, new InkCanvasStrokeCollectedEventArgs(stroke));
+    }
+
     /// <summary>批注笔画收集：按笔锋设置改写 StylusPoints 的假压力（与画板 inkCanvas_StrokeCollected 同款）。
     /// 时间笔锋（case 3）在下方提前处理：其封顶正是逐点硬件压力，必须先于真压感判定与笔锋改写返回。</summary>
     private void PageInkCanvas_StrokeCollected(object sender, InkCanvasStrokeCollectedEventArgs e)
@@ -1401,9 +1530,20 @@ public partial class MainWindow : Window
             if (_viewModel.InkTool.InkStyle == 3)
             {
                 if (sender is PageInkCanvas timeCanvas)
-                    timeCanvas.Controller.FreezeFinalize(e.Stroke, _viewModel.InkTool.PressureEnabled);
+                {
+                    // 自绘笔画（多指副设备）按它自己的设备会话定格；原生笔画走主设备会话
+                    if (e.Stroke.ContainsPropertyData(TimePressureController.SelfDrawnDeviceGuid))
+                        timeCanvas.Controller.FreezeFinalize(
+                            (int)e.Stroke.GetPropertyData(TimePressureController.SelfDrawnDeviceGuid),
+                            e.Stroke, _viewModel.InkTool.PressureEnabled);
+                    else
+                        timeCanvas.Controller.FreezeFinalize(e.Stroke, _viewModel.InkTool.PressureEnabled);
+                }
                 return;
             }
+
+            // 原生收墨笔画（主设备）的会话由控制器在抬笔后按 Background 优先级清场；
+            // 多指书写时不能整页中止（会误杀其他手指的湿墨）。
 
             // 真压感判定（与压感归一合并为单次路径）：压感开启且存在真实压感输入（任一点压力≠0.5 且 ≠0）
             // → 保留硬件压力，不做假笔锋。压感关闭时跳过判定：下方笔锋公式输出只由位置/速度决定
@@ -1503,14 +1643,7 @@ public partial class MainWindow : Window
                         e.Stroke.StylusPoints = stylusPoints;
                     }
                     break;
-                case 2: // 关闭笔锋：不改写；仅压感关闭时需归一 0.5 剥离硬件压力
-                    if (!_viewModel.InkTool.PressureEnabled)
-                    {
-                        var flattened = new StylusPointCollection();
-                        foreach (var stylusPoint in e.Stroke.StylusPoints)
-                            flattened.Add(new StylusPoint(stylusPoint.X, stylusPoint.Y, 0.5f));
-                        e.Stroke.StylusPoints = flattened;
-                    }
+                case 2: // 关闭笔锋：不改写；等宽由硬笔 IgnorePressure 在渲染层实现（RefreshTimePressureArmed 同步），不再抬笔归一
                     break;
             }
         }
@@ -1604,7 +1737,7 @@ public partial class MainWindow : Window
         if (sender is not InkCanvas inkCanvas)
             return;
 
-        // 手掌擦除中：形状已由 PageCanvas_PalmTouchDown 按 ICA 公式（触点宽×k×补偿）设好，不要被橡皮粗细覆盖
+        // 手掌擦除中：形状已由 PageCanvas_PalmTouchDown 按橡皮大小（EraserSize）设好，不要被橡皮粗细覆盖
         if (_palmEraseCanvases.Contains(inkCanvas))
             return;
 
@@ -1632,7 +1765,8 @@ public partial class MainWindow : Window
                  : _viewModel.Settings.FingerModeBoundsWidth);
 
     /// <summary>手掌擦除（仅书写模式，画板 Main_Grid_TouchDown 等价）：摘 EditingMode 绑定 → EraseByPoint，
-    /// 尺寸 = 触点宽 × k(橡皮滑块/10) × 特殊屏补偿（ICA 公式），再 ÷DisplayScale 抵消整层缩放。
+    /// 尺寸 = 橡皮大小 EraserSize ÷DisplayScale 抵消整层缩放（与橡皮光标/面积擦同源，判定仍按触点宽度阈值），
+    /// 并把光标切为橡皮（UpdateInkCursor 按 _palmEraseCanvases 状态）。
     /// EditingMode 是 OneWay 绑定，只摘不接（接回会求值回 Ink 覆盖本地值），恢复的唯一出口是 InkCanvas_TouchUp。</summary>
     private void PageCanvas_PalmTouchDown(object? sender, TouchEventArgs e)
     {
@@ -1643,9 +1777,12 @@ public partial class MainWindow : Window
         if (_inkGestureSuppressed || !IsPalmTouch(e))
             return;                                   // 双指手势进行中让位
 
-        double slider = _viewModel.InkTool.EraserSize / 4;                       // 橡皮粗细滑块显示值 1~20
-        double size = PalmEraseMetrics.GetPalmEraseSize(e, slider)
-                    / Math.Max(1.0, _viewModel.DisplayScale);                    // 页面坐标抵消缩放
+        // 手掌不是书写设备：丢弃它可能已建立的时间笔锋会话，防止手掌湿墨被画出来
+        if (canvas is PageInkCanvas palmCanvas)
+            palmCanvas.Controller.AbortStroke(e.TouchDevice.Id);
+
+        // 手掌擦除尺寸 = 橡皮大小（与橡皮光标/面积擦同源；去掉「触点宽×k×特殊屏补偿」公式）
+        double size = _viewModel.InkTool.EraserSize / Math.Max(1.0, _viewModel.DisplayScale);   // 页面坐标抵消缩放
         canvas.EraserShape = new RectangleStylusShape(size, InkCircleCursor.EraserBoardHeight(size));
 
         var modeProperty = InkCanvas.EditingModeProperty;                        // 照 CommitPendingPdfStroke 手法
@@ -1655,6 +1792,7 @@ public partial class MainWindow : Window
         canvas.EditingMode = InkCanvasEditingMode.EraseByPoint;
 
         _palmEraseCanvases.Add(canvas);
+        UpdateInkCursor();   // 手掌擦除期间光标切为橡皮（尺寸=EraserSize），抬手/卸载恢复
     }
 
     /// <summary>面积擦抬起（鼠标）：提交并复位擦除批处理。</summary>
@@ -1685,6 +1823,7 @@ public partial class MainWindow : Window
             inkCanvas.EditingMode = _viewModel.InkTool.EditingMode;   // 先回显当前工具模式
             if (binding != null)
                 BindingOperations.SetBinding(inkCanvas, modeProperty, binding.ParentBinding);   // 接回即恢复工具同步
+            UpdateInkCursor();   // 手掌擦除结束：光标按当前工具恢复（归零→笔光标）
         }
     }
 
@@ -1905,11 +2044,13 @@ public partial class MainWindow : Window
         FlushInkStore();   // 未走 GoHome/切换的直接关闭（含画板模式中关闭）
         _inkSaveTimer?.Stop();
         // 退出自动安装：开关开启且有已下载更新 → /VERYSILENT 后台安装（不显示窗口、不重启；
-        // 实例等待/防多开归 .iss；「立即更新」启动过安装器则跳过，避免二次安装）
+        // 实例等待/防多开归 .iss；「立即更新」启动过安装器则跳过，避免二次安装；
+        // 其他实例已通过命名互斥体接管安装时也跳过，防止抢跑 /VERYSILENT）
         try
         {
             var s = _viewModel.Settings;
-            if (s.IsAutoCheckUpdate && !UpdateService.InstallLaunched && UpdateService.HasPendingInstall(s))
+            if (s.IsAutoCheckUpdate && !UpdateService.InstallLaunched
+                && !UpdateService.IsInstallClaimedByOther() && UpdateService.HasPendingInstall(s))
                 UpdateService.StartInstall(UpdateService.GetSetupPath(), restart: false);
         }
         catch (Exception ex)

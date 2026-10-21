@@ -393,4 +393,75 @@ public static class UpdateService
             UseShellExecute = true,
         });
     }
+
+    // ══════════ 实例关闭与安装接管 ══════════
+
+    /// <summary>跨进程「安装已接管」命名互斥体名：点击立即更新的实例先持有它，
+    /// 其他实例退出时据此跳过退出自动安装，避免抢先启动 /VERYSILENT 安装器。</summary>
+    private const string InstallClaimMutexName = "InkCanvasForPDF_Updating";
+
+    /// <summary>本进程持有的接管句柄（从不显式释放，进程退出由系统回收）。</summary>
+    private static Mutex? _installClaim;
+
+    /// <summary>声明本进程接管本次安装（在关闭其他实例之前调用）。</summary>
+    public static void ClaimInstall() =>
+        _installClaim = new Mutex(true, InstallClaimMutexName, out _);
+
+    /// <summary>是否有「其他」实例已接管安装（本实例接管的返回 false，
+    /// 本实例自己的退出兜底仍由 InstallLaunched 判断）。</summary>
+    public static bool IsInstallClaimedByOther()
+    {
+        if (_installClaim != null)
+            return false;
+        try
+        {
+            if (Mutex.TryOpenExisting(InstallClaimMutexName, out var m))
+            {
+                m.Dispose();
+                return true;
+            }
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>优雅关闭除本实例外的全部 InkCanvasForPDF 实例（CloseMainWindow 发 WM_CLOSE），
+    /// 每 250ms 轮询等待退出，上限 30 秒；关不掉的不强杀，
+    /// 交由安装器 PrepareToInstall 继续等待（60 秒超时中止为既有行为）。</summary>
+    public static async Task CloseOtherInstancesAsync()
+    {
+        var self = Environment.ProcessId;
+
+        foreach (var p in Process.GetProcessesByName("InkCanvasForPDF"))
+        {
+            using (p)
+            {
+                if (p.Id == self) continue;
+                try { p.CloseMainWindow(); } catch { /* 进程刚好退出 */ }
+            }
+        }
+
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(250);
+            if (!OtherInstanceAlive())
+                return;
+        }
+
+        bool OtherInstanceAlive()
+        {
+            foreach (var q in Process.GetProcessesByName("InkCanvasForPDF"))
+            {
+                using (q)
+                {
+                    try { if (q.Id != self) return true; } catch { /* 已退出，取不到 Id */ }
+                }
+            }
+            return false;
+        }
+    }
 }

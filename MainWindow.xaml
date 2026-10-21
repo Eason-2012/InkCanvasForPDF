@@ -379,13 +379,15 @@
             <!-- 页面区 -->
             <Grid Grid.Column="1">
                 <!-- PDF 页面（打开后显示）：KillerPDF 式布局——纯 ScrollViewer + 居中页槽（ItemsControl/StackPanel），
-                     逐页 LayoutTransform 缩放 + WidthScale 宽度补偿；无 ListBox 虚拟化（页槽常驻，位图级释放）。 -->
+                     逐页 LayoutTransform 缩放 + WidthScale 宽度补偿；无 ListBox 虚拟化（页槽常驻，位图级释放）。
+                     PanningMode=None：内置触摸平移不看手指数（单指会抢书写、换指瞬间质心跳变会跳视图），
+                     平移/缩放/惯性由 MainWindow.xaml.cs 的 PagesControl_Manipulation* 按手指数门控接管。 -->
                 <ScrollViewer x:Name="PagesScrollViewer"
                               Background="{DynamicResource AppBackgroundBrush}"
                               HorizontalScrollBarVisibility="Auto"
                               VerticalScrollBarVisibility="Auto"
                               IsManipulationEnabled="True"
-                              PanningMode="Both"
+                              PanningMode="None"
                               FocusVisualStyle="{x:Null}"
                               Loaded="PagesControl_Loaded"
                               SizeChanged="ScrollViewer_SizeChanged"

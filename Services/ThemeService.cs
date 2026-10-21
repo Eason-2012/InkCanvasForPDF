@@ -10,7 +10,7 @@ namespace InkCanvasForPDF.Services;
 
 /// <summary>全应用颜色主题服务（移植 ICA MW_AutoTheme.cs）：
 /// 换 App 级 Theme\Light.xaml / Theme\Dark.xaml 字典 + iNKORE ThemeManager 双管齐下，
-/// "跟随系统"读注册表 SystemUsesLightTheme 并用 SystemEvents 实时监听切换。</summary>
+/// "跟随系统"读注册表 AppsUseLightTheme（默认应用模式）并用 SystemEvents 实时监听切换。</summary>
 public static class ThemeService
 {
     private static readonly Uri LightUri = new("pack://application:,,,/Theme/Light.xaml");
@@ -90,14 +90,14 @@ public static class ThemeService
             Application.Current.Resources.MergedDictionaries.Remove(dictionaryToRemove);
     }
 
-    /// <summary>读注册表 HKCU\...\Themes\Personalize\SystemUsesLightTheme（抄 ICA IsSystemThemeLight）。</summary>
+    /// <summary>读注册表 HKCU\...\Themes\Personalize\AppsUseLightTheme（默认应用模式，而非默认 Windows 模式）。</summary>
     private static bool IsSystemThemeLight()
     {
         try
         {
             using var themeKey = Registry.CurrentUser
                 .OpenSubKey(@"software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
-            return themeKey != null && (int)(themeKey.GetValue("SystemUsesLightTheme") ?? 0) == 1;
+            return themeKey != null && (int)(themeKey.GetValue("AppsUseLightTheme") ?? 0) == 1;
         }
         catch
         {

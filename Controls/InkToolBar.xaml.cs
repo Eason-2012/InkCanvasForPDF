@@ -123,8 +123,8 @@ public partial class InkToolBar : System.Windows.Controls.UserControl
                             // 设置页/画板改墨迹纠正开关 → 两个页签的开关镜像 VM 实际值（程序化赋同值不回环）
                             if (e.PropertyName == nameof(InkToolViewModel.IsInkToShapeEnabled))
                             {
-                                ToggleSwitchEnableInkToShapeHard.IsOn = Vm?.InkTool.IsInkToShapeEnabled ?? true;
-                                ToggleSwitchEnableInkToShapeSoft.IsOn = Vm?.InkTool.IsInkToShapeEnabled ?? true;
+                                ToggleSwitchEnableInkToShapeHard.IsOn = Vm?.InkTool.IsInkToShapeEnabled ?? false;
+                                ToggleSwitchEnableInkToShapeSoft.IsOn = Vm?.InkTool.IsInkToShapeEnabled ?? false;
                                 return;
                             }
                             if (e.PropertyName != nameof(InkToolViewModel.ShapeDrawMode)) return;
@@ -615,11 +615,11 @@ public void ApplyFloatBarText(bool show)
             double s = ViewboxFloatingBarScaleTransform.ScaleX * 0.65;
             EraserPaletteRoot.LayoutTransform = new ScaleTransform(s, s);
             EraserPalette.PlacementTarget = BtnEraser;
-            // 打开前回填 UI：Pivot 页签、粗细滑块（值=EraserSize/4）、手掌擦除/笔尖模式开关、滑动清空滑块复位
+            // 打开前回填 UI：Pivot 页签、粗细滑块（值=SliderFromEraserSize(EraserSize)）、手掌擦除/笔尖模式开关、滑动清空滑块复位
             if (Vm is { } vm)
             {
                 PivotEraser.SelectedIndex = vm.InkTool.IsStrokeEraser ? 1 : 0;
-                EraserSizeSlider.Value = vm.InkTool.EraserSize / 4;
+                EraserSizeSlider.Value = InkToolViewModel.SliderFromEraserSize(vm.InkTool.EraserSize);
                 _syncingEraserToggles = true;
                 ToggleSwitchPalmEraseArea.IsOn = ToggleSwitchPalmEraseStroke.IsOn = vm.Settings.IsPalmEraseEnabled;
                 ToggleSwitchNibModeArea.IsOn = ToggleSwitchNibModeStroke.IsOn = vm.Settings.IsNibModeEnabled;
@@ -661,12 +661,12 @@ public void ApplyFloatBarText(bool show)
         }
     }
 
-    /// <summary>橡皮粗细滑块（1-20 对齐设置页）→ 实际 EraserSize=值×4（MainWindow 监听变更统一刷 EraserShape），
+    /// <summary>橡皮粗细滑块（1-30）→ 实际 EraserSize=15+3.5x（MainWindow 监听变更统一刷 EraserShape），
     /// 并回写 EraserSizeSetting 持久化（同值守卫：菜单打开回填滑块不重复存盘）。</summary>
     private void EraserSizeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (Vm is not { } vm) return;
-        vm.InkTool.EraserSize = e.NewValue * 4;
+        vm.InkTool.EraserSize = InkToolViewModel.EraserSizeFromSlider(e.NewValue);
         if (vm.Settings.EraserSizeSetting != (int)e.NewValue)
         {
             vm.Settings.EraserSizeSetting = (int)e.NewValue;

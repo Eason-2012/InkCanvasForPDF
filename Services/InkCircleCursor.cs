@@ -84,8 +84,19 @@ internal sealed class InkCircleCursor : IDisposable
     /// <summary>生成宽 widthDips × 高 heightDips（屏幕 DIP）的光标；draw 收到的 Rect 为图形区（不含边距）。</summary>
     private static InkCircleCursor? Create(double widthDips, double heightDips, double dpiScale, Action<DrawingContext, Rect> draw)
     {
-        double w = Math.Clamp(widthDips, 4, 128);      // 上限 128 DIP：防超大位图（Windows 光标惯例上限内）
-        double h = Math.Clamp(heightDips, 4, 128);
+        // 上限 256 DIP：防超大位图；超限时按同一比例整体缩（保持 38:56 等形状比例——
+        // 分维独立截断会让大尺寸光标先截高、形状"变胖"，且与擦除洞不等大）。下限 4 DIP。
+        double w = widthDips;
+        double h = heightDips;
+        double maxDim = Math.Max(w, h);
+        if (maxDim > 256)
+        {
+            double k = 256 / maxDim;
+            w *= k;
+            h *= k;
+        }
+        w = Math.Max(4, w);
+        h = Math.Max(4, h);
         const double pad = 2;                          // DIP 边距，容纳描边外扩
 
         var visual = new DrawingVisual();

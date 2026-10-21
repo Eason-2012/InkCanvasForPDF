@@ -1251,7 +1251,7 @@
                                                 <ui:ToggleSwitch
                                                     x:Name="ToggleSwitchEnableInkToShape"
                                                     MinWidth="0"
-                                                    IsOn="True"
+                                                    IsOn="False"
                                                     OffContent=""
                                                     OnContent=""
                                                     Toggled="ToggleSwitchEnableInkToShape_Toggled" />
@@ -1547,7 +1547,7 @@
                                                 <ui:ToggleSwitch
                                                     x:Name="ToggleSwitchEnableInkToShapeSoft"
                                                     MinWidth="0"
-                                                    IsOn="True"
+                                                    IsOn="False"
                                                     OffContent=""
                                                     OnContent=""
                                                     Toggled="ToggleSwitchEnableInkToShape_Toggled" />
@@ -2127,7 +2127,7 @@
                                                         OnContent=""
                                                         Toggled="BoardToggleSwitchNibMode_Toggled" />
                                                 </ikw:SimpleStackPanel>
-                                                <!--  粗细行（照 InkWidthSliderHard 三列 Grid；范围 1-20 对齐设置页，实际 EraserSize=值×4）  -->
+                                                <!--  粗细行（照 InkWidthSliderHard 三列 Grid；范围 1-30，实际 EraserSize=15+3.5x）  -->
                                                 <Grid>
                                                     <Grid.ColumnDefinitions>
                                                         <ColumnDefinition Width="Auto" />
@@ -2139,7 +2139,7 @@
                                                         Grid.Column="1"
                                                         Margin="10,0,0,0"
                                                         IsSnapToTickEnabled="True"
-                                                        Maximum="20"
+                                                        Maximum="30"
                                                         Minimum="1"
                                                         TickFrequency="1"
                                                         TickPlacement="None"
@@ -2194,7 +2194,7 @@
                                             <Thumb x:Name="BoardClearInkThumb"
                                                 Width="40"
                                                 Height="40"
-                                                Margin="4,4,0,4"
+                                                Margin="4,3,0,3"
                                                 HorizontalAlignment="Left"
                                                 VerticalAlignment="Center"
                                                 Focusable="True"
@@ -2269,7 +2269,7 @@
                                             FontWeight="Bold"
                                             Foreground="#666666"
                                             VerticalAlignment="Center"
-                                            Text="支持长按保持选中" />
+                                            Text="长按或右键可保持选中该图形" />
                                         <ui:FontIcon
                                             x:Name="BoardBorderDrawShapePin"
                                             Width="16"

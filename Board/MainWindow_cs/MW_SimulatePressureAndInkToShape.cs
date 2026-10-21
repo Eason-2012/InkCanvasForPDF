@@ -1,4 +1,5 @@
 using InkCanvasForPDF.Board.Helpers;
+using InkCanvasForPDF.Services;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -33,9 +34,18 @@ namespace InkCanvasForPDF.Board
                 // 必须提前于"压感归一"与"真压感 return"两道门——时间笔锋的封顶正是逐点硬件压力。
                 if (Settings.Canvas.InkStyle == 3)
                 {
-                    inkCanvas.Controller.FreezeFinalize(e.Stroke, _pressureEnabled);
+                    // 多触摸模式：触摸设备由叠加层自绘，按它自己的设备会话定格；数位笔原生笔画走主设备会话
+                    if (e.Stroke.ContainsPropertyData(TimePressureController.SelfDrawnDeviceGuid))
+                        inkCanvas.Controller.FreezeFinalize(
+                            (int)e.Stroke.GetPropertyData(TimePressureController.SelfDrawnDeviceGuid),
+                            e.Stroke, _pressureEnabled);
+                    else
+                        inkCanvas.Controller.FreezeFinalize(e.Stroke, _pressureEnabled);
                     return;
                 }
+
+                // 屏蔽模式（0/1 笔锋·硬笔）的湿墨已由叠加层等宽呈现；会话由控制器在抬笔后清场，
+                // 不能在此整页中止——多触摸模式下会误杀其他手指的湿墨。
 
                 // 真压感判定（与压感归一合并为单次路径）：压感开启且存在真实压感输入（任一点压力≠0.5 且 ≠0）
                 // → 保留硬件压力，不做假笔锋。压感关闭时跳过判定：下方笔锋公式输出只由位置/速度决定
@@ -148,14 +158,7 @@ namespace InkCanvasForPDF.Board
 
                         }
                         break;
-                    case 2: // 关闭笔锋：不改写；仅压感关闭时需归一 0.5 剥离硬件压力
-                        if (!_pressureEnabled)
-                        {
-                            StylusPointCollection flattened = new StylusPointCollection();
-                            foreach (StylusPoint stylusPoint in e.Stroke.StylusPoints)
-                                flattened.Add(new StylusPoint(stylusPoint.X, stylusPoint.Y, 0.5f));
-                            e.Stroke.StylusPoints = flattened;
-                        }
+                    case 2: // 关闭笔锋：不改写；等宽由硬笔 IgnorePressure 在渲染层实现（RefreshTimePressureArmed 同步），不再抬笔归一
                         break;
                     // case 3 时间笔锋：已在方法开头提前处理（FreezeFinalize 定格写回），此处不再有分支
                 }

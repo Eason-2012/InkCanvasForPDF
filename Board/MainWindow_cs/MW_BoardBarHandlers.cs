@@ -165,7 +165,7 @@ namespace InkCanvasForPDF.Board
         {
             forceEraser = true;
             forcePointEraser = true;
-            // 直径取 InkCanvasForPDF 设置（EraserSizeSetting × 4，由 MainWindow 注入），与 PDF 批注侧一致；黑板擦 38:56 矩形
+            // 直径取 InkCanvasForPDF 设置（EraserSizeSetting 经 15+3.5x 换算，由 MainWindow 注入），与 PDF 批注侧一致；黑板擦 38:56 矩形
             inkCanvas.EraserShape = new RectangleStylusShape(EraserDiameter, InkCircleCursor.EraserBoardHeight(EraserDiameter));
             inkCanvas.EditingMode = InkCanvasEditingMode.EraseByPoint;
             drawingShapeMode = 0;
@@ -248,6 +248,7 @@ namespace InkCanvasForPDF.Board
 
         private void ToggleSwitchEnableMultiTouchMode_Toggled(object sender, RoutedEventArgs e)
         {
+            if (!isLoaded) return;   // 构造器回填 IsOn 时不触运行时（由 BoardView 构造器尾部统一恢复，与旁系处理器一致）
             if (ToggleSwitchEnableMultiTouchMode.IsOn)
             {
                 if (!isInMultiTouchMode) BorderMultiTouchMode_MouseUp(null, null);

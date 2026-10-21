@@ -257,12 +257,14 @@ namespace InkCanvasForPDF.Board
                     byte NowB = drawingAttributes.Color.B;
                     drawingAttributes.Color = Color.FromArgb((byte)Settings.Canvas.InkAlpha, NowR, NowG, NowB);
                     drawingAttributes.IsHighlighter = true;
+                    drawingAttributes.IgnorePressure = true;   // 荧光笔屏蔽压感（等粗绘制）
                 }
                 else
                 {
                     drawingAttributes.Height = Settings.Canvas.InkWidth;
                     drawingAttributes.Width = Settings.Canvas.InkWidth;
                     drawingAttributes.IsHighlighter = false;
+                    drawingAttributes.IgnorePressure = false;  // 复位为 WPF 默认（跟随压感）
                 }
                 RefreshTimePressureArmed();   // 颜色/荧光笔档位切换影响时间笔锋武装状态（inkColor>100 豁免）
             }
@@ -480,8 +482,9 @@ namespace InkCanvasForPDF.Board
         }
 
         /// <summary>切换画板墨迹类型（0=硬笔 1=软笔 2=荧光笔）：装入该类型记忆的粗细（硬/软笔共用）；
-        /// 硬/软笔颜色按画布（白底→黑 0、黑底→白 5，与 ICA lastBoardInkColor 黑白互换同规），荧光笔装入记忆色；
-        /// 压感随硬/软笔切换（荧光笔保持上次值，其本身豁免时间笔锋武装）。调用方随后 CheckColorTheme 刷新 UI。</summary>
+        /// 硬/软笔颜色装入共享记忆色（PenColor）；按画布黑白覆盖（白底→黑 0、黑底→白 5）只发生在
+        /// 进入画板（EnterBoard）与存储值非法时（canvasColorOverride），切页签不覆盖；
+        /// 荧光笔装入记忆色；压感随硬/软笔切换（荧光笔保持上次值，其本身豁免时间笔锋武装）。调用方随后 CheckColorTheme 刷新 UI。</summary>
         private void ApplyBoardInkType(int type, bool canvasColorOverride)
         {
             boardInkType = Math.Clamp(type, 0, 2);
@@ -512,7 +515,8 @@ namespace InkCanvasForPDF.Board
         }
 
         /// <summary>墨迹菜单页签切换：旧类型活动值回写记忆 → 装入新类型（LastPenKind 只记硬/软笔）→
-        /// 回填滑块/下拉框 → CheckColorTheme 刷新色板勾标与画笔属性 → 落盘。</summary>
+        /// 回填滑块/下拉框 → CheckColorTheme 刷新色板勾标与画笔属性 → 落盘。
+        /// 不按画布覆盖颜色：硬/软笔共用 PenColor，切页签保留当前颜色（黑白换色只在进入画板/画布切换时发生）。</summary>
         private void BoardPivotInk_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (!isLoaded) return;
@@ -520,7 +524,7 @@ namespace InkCanvasForPDF.Board
             if (target < 0 || target == boardInkType) return;
             SaveActiveColorToStore();
             SaveActiveWidthToStore();
-            ApplyBoardInkType(target, canvasColorOverride: true);
+            ApplyBoardInkType(target, canvasColorOverride: false);
             if (boardInkType <= 1) Settings.Canvas.LastPenKind = boardInkType;   // 荧光笔不记录为"上次启用的画笔"
             SyncBoardInkControls();
             CheckColorTheme();

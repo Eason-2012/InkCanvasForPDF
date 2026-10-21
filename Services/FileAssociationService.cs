@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using Microsoft.Win32;
 
 namespace InkCanvasForPDF.Services;
@@ -77,9 +79,14 @@ internal static class FileAssociationService
             {
                 // 4) 被显式 Deny SetValue 拦截 → 删掉 UserChoice 键（父键 FullControl，Deny 不含 DELETE），
                 //    不重建：无 UserChoice 时系统按 HKCR 合并规则回落到第 2 步的 HKCU 类默认。
-                using var parent = Registry.CurrentUser.OpenSubKey(
-                    @"Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.pdf", writable: true);
-                parent?.DeleteSubKey("UserChoice");
+                //    .NET 的 DeleteSubKey 在本机被拒（见 error.log），改走只校验子键 DELETE 权限的直删路径；
+                //    删没删掉以回读为准，删不掉就原样抛出 → 外层红条文案不变。
+                if (TryDeleteUserChoice())
+                {
+                    SHChangeNotify(0x08000000, 0x1000, IntPtr.Zero, IntPtr.Zero);
+                    return true;
+                }
+                throw;
             }
 
             SHChangeNotify(0x08000000, 0x1000, IntPtr.Zero, IntPtr.Zero);
@@ -93,7 +100,65 @@ internal static class FileAssociationService
         }
     }
 
+    /// <summary>删除 UserChoice 键：.NET DeleteSubKey 在本机被拒，依次尝试 RegDeleteKeyEx 直删、
+    /// reg.exe delete（独立进程隐藏窗口），成败一律以回读键是否还在为准；过程异常只记日志。</summary>
+    private static bool TryDeleteUserChoice()
+    {
+        // A) Win32 直删：只校验子键 DELETE 权限（父键 FullControl 已授予）
+        try
+        {
+            const int errorFileNotFound = 2;
+            int hr = RegDeleteKeyEx(new IntPtr(unchecked((int)0x80000001)) /*HKEY_CURRENT_USER*/,
+                UserChoicePath, 0, 0);
+            if (hr == 0 || hr == errorFileNotFound)
+                return !UserChoiceExists();
+            App.LogText($"FileAssociationService.DeleteUserChoice RegDeleteKeyEx hr={hr}");
+        }
+        catch (Exception ex)
+        {
+            App.Log("FileAssociationService.DeleteUserChoice.RegDeleteKeyEx", ex);
+        }
+
+        // B) reg.exe 兜底（与 .NET 无关的独立进程）
+        try
+        {
+            using var p = Process.Start(new ProcessStartInfo
+            {
+                FileName = "reg.exe",
+                Arguments = $"delete \"HKCU\\{UserChoicePath}\" /f",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            });
+            if (p is not null)
+            {
+                p.WaitForExit(5000);
+                if (p.ExitCode == 0)
+                    return !UserChoiceExists();
+                App.LogText($"FileAssociationService.DeleteUserChoice reg.exe exit={p.ExitCode}");
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log("FileAssociationService.DeleteUserChoice.reg", ex);
+        }
+
+        return !UserChoiceExists();
+    }
+
+    /// <summary>UserChoice 键当前是否存在（删除是否生效的唯一判据）。</summary>
+    private static bool UserChoiceExists()
+    {
+        using var k = Registry.CurrentUser.OpenSubKey(UserChoicePath);
+        return k != null;
+    }
+
     /// <summary>通知 Shell 关联已变更（刷新文件图标/打开方式缓存）。</summary>
     [System.Runtime.InteropServices.DllImport("shell32.dll")]
     private static extern void SHChangeNotify(int wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
+
+    /// <summary>Win32 直删子键（0 位句柄 = HKEY_CURRENT_USER，需子键 DELETE 权限）。</summary>
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int RegDeleteKeyEx(IntPtr hKey, string lpSubKey, int samDesired, int reserved);
 }
