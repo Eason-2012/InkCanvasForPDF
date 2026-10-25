@@ -34,7 +34,12 @@ internal sealed class TimePressurePlugIn : StylusPlugIn
     {
         int id = rawStylusInput.StylusDeviceId;
         if (_active.ContainsKey(id))
-            return;
+        {
+            // 同一设备号再次落笔 = 上一次的抬笔事件丢失（会话僵死、叠加层湿墨常驻）：
+            // 先丢弃旧会话再开新笔，避免旧湿墨跟着粗细/颜色变化且无法撤销。
+            _controller.AbortStroke(id);
+            _active.Remove(id);
+        }
         _active[id] = rawStylusInput.TabletDeviceId;
         // 未接收集的设备（多指书写关闭时的第二触点/手掌）只登记、不采集——绝不写入他人会话
         if (!_controller.ShouldCollect(id, rawStylusInput.TabletDeviceId))
@@ -220,6 +225,7 @@ public sealed class TimePressureController
         public TimePressureOverlay.SessionLayer? Layer;
         public int AnomalyLogCount;
         public bool InProgress;
+        public bool Translucent;   // 半透明笔（荧光笔）：不做分批提交，避免接缝处重复绘制导致 alpha 叠加圆点
         public long Token;   // 会话令牌：延迟清理只在令牌仍匹配时生效，防误杀同设备的下一笔
     }
 
@@ -231,11 +237,19 @@ public sealed class TimePressureController
 
     public bool ShieldArmed => _shieldArmed;
 
-    /// <summary>PDF 多指书写：副设备（非主设备）也由叠加层实时绘制、抬笔自建 Stroke。</summary>
+    /// <summary>PDF 多指书写：副设备（非主设备）也由叠加层实时绘制、抬笔自建 Stroke。
+    /// 关闭（含切到橡皮/选择/形状）时立即中止在绘会话，防残留湿墨被提交。</summary>
     public bool MultiDeviceEnabled
     {
         get => _multiDeviceEnabled;
-        set => _multiDeviceEnabled = value;
+        set
+        {
+            if (_multiDeviceEnabled == value)
+                return;
+            _multiDeviceEnabled = value;
+            if (!value)
+                AbortStroke();
+        }
     }
 
     /// <summary>画板多触摸：全部设备都由叠加层绘制（触摸经 StrokeVisual 自绘、数位笔仍走原生命中管线，抬笔按设备类型决定是否自提交）。</summary>
@@ -249,6 +263,8 @@ public sealed class TimePressureController
             _selfDrawAllDevices = value;
             if (value)
                 RefreshTabletTypes();   // 需要区分数位笔/触摸设备（数位笔走原生命中管线，避免双份湿墨）
+            else
+                AbortStroke();          // 切到橡皮/选择/形状：丢弃在绘会话与叠加层湿墨，防残留被提交
         }
     }
 
@@ -326,6 +342,18 @@ public sealed class TimePressureController
     /// <summary>清掉指定设备的会话与视觉（幂等；宿主在收笔处理后调用）。</summary>
     public void EndStroke(int deviceId) => EndSession(deviceId);
 
+    /// <summary>仅在"该设备有会话但从未收到抬笔"时结束（丢失 StylusUp 的僵死会话）。
+    /// 正常抬笔已在 MarkStrokeUp 写入抬笔时刻，不会命中，避免误杀正在书写的笔画。</summary>
+    public void AbortStrokeIfPending(int deviceId)
+    {
+        lock (_sync)
+        {
+            if (!_sessions.TryGetValue(deviceId, out var session) || session.UpElapsedMs > 0)
+                return;
+        }
+        EndSession(deviceId);
+    }
+
     // ───────────────────────────── 笔线程采集入口 ─────────────────────────────
 
     /// <summary>该设备是否归叠加层采集渲染。首个落笔设备记为主设备（InkCanvas 原生收墨的那支）；
@@ -349,9 +377,12 @@ public sealed class TimePressureController
                     return false;
                 return true;
             }
+            // 副设备：多指书写（必须先于武装判断——否则样式 3 / 硬笔 0/1 时副设备永远不被采集）
+            if (!primary && _multiDeviceEnabled)
+                return true;
             if (_collectArmed || _shieldArmed)
                 return primary;
-            return _multiDeviceEnabled && !primary;
+            return false;
         }
     }
 
@@ -375,14 +406,6 @@ public sealed class TimePressureController
         {
             if (!_sessions.TryGetValue(deviceId, out var session) || !session.InProgress)
                 return;
-
-            // 回跳/重放过滤：点击/触摸链路偶尔会把落在旧位置的点（如落笔点）再送一次，
-            // 直接追加会让叠加层折线从当前位置跳回再跳回当前，视觉上就是一根"连接到一起的假线"。
-            if (IsReplayPacket(session, points))
-            {
-                LogAnomaly(session, deviceId, points, "replay");
-                return;
-            }
 
             // 批内逐点分摊时间戳：输入管线会成批递交采样（收笔减速段/抬笔包常合并），
             // 若批内所有点共用同一时刻，点龄相同 → 定格压力相同 → 末端宽度平台收不到针尖。
@@ -419,6 +442,14 @@ public sealed class TimePressureController
                 }
                 if (Math.Abs(x - px) < 0.02 && Math.Abs(y - py) < 0.02)
                     continue;   // 与上一已收点重合：丢弃（不产生时间戳，避免零长线段）
+                // 回跳点：与上一已收点远跳（>10px）且落在 6 点之前的旧轨迹 3px 内 → 丢弃该点。
+                // 触摸链路偶发把旧位置的点（如落笔点）再送一次，留着会让叠加层折线跳回再跳回 → 假线；
+                // 单指时干墨由 InkCanvas 自己的点生成（这里只影响湿墨），多指自绘时干墨来自采样，必须在这里就拦住。
+                if (PointJumpedBack(session, x, y, px, py))
+                {
+                    LogAnomaly(session, deviceId, x, y);
+                    continue;
+                }
                 clean.Add((x, y, point.PressureFactor));
             }
             int n = clean.Count;
@@ -456,51 +487,36 @@ public sealed class TimePressureController
         }
     }
 
-    /// <summary>回跳包判定：包内首点距上一已收点超过 10 px（正常连续输入不会），
-    /// 且落在至少 6 点之前的某个旧采样 2 px 内，并且（末点仍在上次位置附近 = 重放整段历史）
-    /// 或（包内只有 1 点 = 孤立回跳）。合法的自交/慢速回描不会同时满足这些条件。</summary>
-    private static bool IsReplayPacket(DeviceSession session, StylusPointCollection points)
+    /// <summary>逐点回跳判定：待收点与上一已收点距离 > 25 px（远超正常连续输入的包间距），且落在
+    /// 至少 6 点之前的某个旧采样 3 px 内。合法的自交/快速回描最多丢 1 个点（折线略稀疏），不会断笔；
+    /// 25 px 门槛同时把扫描频率压到很低（只有异常远跳才做旧轨迹搜索）。</summary>
+    private static bool PointJumpedBack(DeviceSession session, double x, double y, double px, double py)
     {
+        double gx = x - px;
+        double gy = y - py;
+        if (gx * gx + gy * gy <= 625)
+            return false;   // 与上一已收点 ≤ 25 px
         int count = session.Samples.Count;
         if (count < 6)
             return false;
-        var last = session.Samples[count - 1];
-        Point first = new(points[0].X, points[0].Y);
-        if (Distance(first, last.X, last.Y) <= 10)
-            return false;
-        bool nearEarlier = false;
         int limit = count - 6;
         for (int i = 0; i < limit; i++)
         {
             var sample = session.Samples[i];
-            if (Distance(first, sample.X, sample.Y) < 2)
-            {
-                nearEarlier = true;
-                break;
-            }
+            double dx = x - sample.X;
+            double dy = y - sample.Y;
+            if (dx * dx + dy * dy < 9)
+                return true;   // 3 px 内命中旧轨迹
         }
-        if (!nearEarlier)
-            return false;
-        if (points.Count == 1)
-            return true;
-        Point lastPoint = new(points[points.Count - 1].X, points[points.Count - 1].Y);
-        return Distance(lastPoint, last.X, last.Y) < 10;
+        return false;
     }
 
-    private static double Distance(Point point, double x, double y)
-    {
-        double dx = point.X - x;
-        double dy = point.Y - y;
-        return Math.Sqrt(dx * dx + dy * dy);
-    }
-
-    private void LogAnomaly(DeviceSession session, int deviceId, StylusPointCollection points, string kind)
+    private void LogAnomaly(DeviceSession session, int deviceId, double x, double y)
     {
         if (!LogSampleAnomalies || session.AnomalyLogCount >= MaxAnomalyLogPerStroke)
             return;
         session.AnomalyLogCount++;
-        App.LogText($"[TimePen] drop {kind} dev={deviceId} count={points.Count} " +
-                    $"first=({points[0].X:F1},{points[0].Y:F1}) settled={session.Samples.Count}");
+        App.LogText($"[TimePen] drop jump dev={deviceId} at=({x:F1},{y:F1}) settled={session.Samples.Count}");
     }
 
     /// <summary>记录抬笔包到达时刻（笔线程 OnStylusUp 调用，紧跟真实物理抬笔）。
@@ -634,6 +650,8 @@ public sealed class TimePressureController
             if (!_sessions.TryGetValue(deviceId, out var session))
                 return;
             session.CommittedBoundary = 0;
+            // 半透明笔（荧光笔）判定只能在 UI 线程读画布 DA；半透明笔不做分批提交（接缝重复会叠出深色圆点）
+            session.Translucent = _canvas.DefaultDrawingAttributes.Color.A < 255;
             session.Layer = _overlay.AddSessionLayer(deviceId);   // 同 id 旧层由 AddSessionLayer 先移除
         }
         if (_renderingHooked)
@@ -667,6 +685,7 @@ public sealed class TimePressureController
         int localBoundary;
         double now;
         TimePressureOverlay.SessionLayer? layer;
+        bool translucent;
         double growMs = GrowMs;
         lock (_sync)
         {
@@ -681,6 +700,7 @@ public sealed class TimePressureController
             // 定格/末帧以抬笔包时刻为基准（排除 UI 线程处理延迟）；书写中用活时钟
             now = useUpTime && session.UpElapsedMs > 0 ? session.UpElapsedMs : session.Clock.Elapsed.TotalMilliseconds;
             layer = session.Layer;
+            translucent = session.Translucent;
         }
 
         int count = snapshot.Count;
@@ -695,7 +715,9 @@ public sealed class TimePressureController
         while (localMature < count && (now - snapshot[localMature].T) >= growMs)
             localMature++;
         int pending = localMature - localBoundary;   // 已成熟未提交的点数
-        bool flush = useUpTime ? pending >= 1 : pending >= CommitBatchPoints;
+        // 半透明笔永不提交：已定型段/生长段在接缝处会重复绘制同一个圆头端点，
+        // 荧光笔 alpha 叠加后就是周期性深色圆点。整笔只留生长层，单一连续路径每帧重绘。
+        bool flush = !translucent && (useUpTime ? pending >= 1 : pending >= CommitBatchPoints);
         int growingFrom;
         if (flush)
         {
@@ -900,11 +922,12 @@ public sealed class TimePressureController
         return 0.5 * tipPageWidth / pageWidth;
     }
 
-    /// <summary>封顶压力 = 该点硬件压力（压感关闭时统一 0.5），且不低于起始针尖。</summary>
+    /// <summary>封顶压力 = 该点硬件压力（压感关闭/荧光笔时统一 0.5），且不低于起始针尖。</summary>
     private double CapPressure(TimePressureSample sample)
     {
         double tip = TipPressure();
-        double cap = PressureEnabled ? sample.P : 0.5;
+        // 荧光笔无笔锋：粗细恒定，不吃硬件压力（与 IgnorePressure 一致）
+        double cap = _canvas.DefaultDrawingAttributes.IsHighlighter || !PressureEnabled ? 0.5 : sample.P;
         if (double.IsNaN(cap) || cap <= 0)
             cap = 0.5;
         return Math.Max(cap, tip);

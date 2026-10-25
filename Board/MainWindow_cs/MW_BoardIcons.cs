@@ -260,11 +260,34 @@ namespace InkCanvasForPDF.Board
         }
 
         /// <summary>滑到底：清空当前画板墨迹（画板清屏统一入口：选区删除 / 自动截图分支 + BtnClear_Click），
-        /// 随即回左；不切回笔模式、不关菜单（与 PDF CompleteClearInk 一致）。</summary>
+        /// 随即回左。仅在成功清空时按画板侧设置自动切换模式并关闭橡皮菜单；
+        /// BtnClear_Click 内部"清屏前先回画笔"的既有约定保留，切换到鼠标/保持橡皮/选择时在其后覆盖。</summary>
         private void BoardCompleteClearInk()
         {
-            SymbolIconDelete_MouseUp(null, null);
+            bool cleared = SymbolIconDelete_MouseUp(null!, null!);
             AnimateBoardClearInkBack();
+            if (cleared && Vm is { } vm)
+            {
+                switch (vm.Settings.BoardClearInkAutoSwitchMode)
+                {
+                    case 1:   // 切换到鼠标：浏览模式（EditingMode=None），并复位工具按钮高亮（"mouse" 不匹配任何高亮分支）
+                        SymbolIconCursor_Click(null!, null!);
+                        HideSubPanels("mouse");
+                        break;
+                    case 2:   // 切换到墨迹：整屏分支经 BtnClear_Click 已回画笔；选区分支画笔未激活才切（已激活直接切会误开墨迹面板）
+                        if (BoardPen.Opacity == 1)
+                            PenIcon_Click(null!, null!);
+                        break;
+                    case 3:   // 切换到选择
+                        SymbolIconSelect_Click(null!, null!);   // BtnSelect_Click + HideSubPanels("select")
+                        break;
+                    case 0:   // 保持在橡皮：覆盖 BtnClear_Click 的回笔
+                        ApplyBoardEraserMode();
+                        HideSubPanels("eraser");
+                        break;
+                }
+                PopupFlyAnimator.FlyOut(BoardEraserPalette, BoardEraserPaletteRoot);   // 成功清空即关橡皮菜单（幂等兜底）
+            }
         }
 
         /// <summary>回弹到初始位：文字立即复原，滑块 160ms EaseOut 滑回（无淡入）。</summary>

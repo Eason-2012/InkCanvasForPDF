@@ -355,7 +355,7 @@ public sealed class InkToolViewModel : ViewModelBase
         set => SetField(ref _isInkToShapeEnabled, value);
     }
 
-    private bool _isUselightThemeColor = true;
+    private bool _isUselightThemeColor = false;
 
     /// <summary>调色盘主题：true=亮系，false=暗系（切换时重算当前墨迹色；色块背景由 InkToolBar 重绘）。</summary>
     public bool IsUselightThemeColor

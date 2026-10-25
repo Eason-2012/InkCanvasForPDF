@@ -281,7 +281,8 @@ namespace InkCanvasForPDF.Board
         private double _boardBarOpacity = 0.75;
 
         /// <summary>画板墨迹栏布局（设置：缩放 + 底部边距 + 透明度）：三组 ScaleTransform 同步缩放；
-        /// 三条 BoardBar 的 Viewbox 只改 Margin 底部分量（保留 Left/Top/Right）；三条 Grid 统一 Opacity。</summary>
+        /// 三条 BoardBar 的 Viewbox 只改 Margin 底部分量（保留 Left/Top/Right）；
+        /// 不透明度由背景画刷承担（不整条压 Grid：图标、文字与选中高亮保持实心）。</summary>
         public void ApplyBoardBarLayout(double scale, double bottomMargin, double opacity)
         {
             _boardBarScale = scale;
@@ -297,11 +298,31 @@ namespace InkCanvasForPDF.Board
                 var m = vb.Margin;
                 vb.Margin = new Thickness(m.Left, m.Top, m.Right, bottomMargin);
             }
-            var clamped = Math.Clamp(opacity, 0, 1);
-            // 不透明度只作用于三条按钮条；弹窗（墨迹选项/点击清屏/手势面板）在 Grid 内但不在按钮条里，恒不透明（对齐 PDF 侧）
-            BlackboardLeftBarPanel.Opacity = clamped;
-            BlackboardCenterBarPanel.Opacity = clamped;
-            BlackboardRightBarPanel.Opacity = clamped;
+            ApplyBoardBarBrushOpacity();
+        }
+
+        /// <summary>把"不透明度"设置压到按钮条的背景/边框画刷（克隆主题画刷做控件级本地覆盖，屏蔽合并字典原值；
+        /// 弹窗用 FloatBarBackgroundWithoutOpacity 不在覆盖范围，恒不透明——对齐 PDF 侧）。
+        /// 只压背景：图标、文字与选中高亮保持实心。基准值每次都取自主题字典实例（本地覆盖不参与扫描），
+        /// 故可重复调用；主题切换 SetBoardTheme 换字典后须重调。</summary>
+        private void ApplyBoardBarBrushOpacity()
+        {
+            double f = Math.Clamp(_boardBarOpacity, 0, 1);
+            foreach (var dict in Resources.MergedDictionaries)
+            {
+                if (dict.Contains("BoardBarBackground") && dict["BoardBarBackground"] is SolidColorBrush bg)
+                {
+                    var clone = (SolidColorBrush)bg.Clone();
+                    clone.Opacity = f;
+                    Resources["BoardBarBackground"] = clone;
+                }
+                if (dict.Contains("BoardBarBorderBrush") && dict["BoardBarBorderBrush"] is SolidColorBrush border)
+                {
+                    var clone = (SolidColorBrush)border.Clone();
+                    clone.Opacity = border.Opacity * f;   // 主题基准 alpha × 设置
+                    Resources["BoardBarBorderBrush"] = clone;
+                }
+            }
         }
 
         /// <summary>画笔光标开关（主设置 isShowCursor；由 MainWindow 注入，替代黑板本地 ICA Settings.Canvas.IsShowCursor）。</summary>
@@ -390,6 +411,7 @@ namespace InkCanvasForPDF.Board
             if (old != null)
                 dictionaries.Remove(old);
             dictionaries.Add(new ResourceDictionary { Source = uri });
+            ApplyBoardBarBrushOpacity();   // 主题画刷实例已换，按新基准重算不透明度覆盖
         }
     }
 }

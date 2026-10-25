@@ -218,7 +218,7 @@ namespace InkCanvasForPDF.Board
 
         // ═══ 画板工具面板开关（ICA MW_Settings.cs 移植，画板命名单实例）═══
 
-        /// <summary>停顿纠正开关（硬笔/软笔两个页签，全局共享）：镜像另一个页签并回流主设置（MainWindow 落盘）。</summary>
+        /// <summary>停顿纠正开关（硬笔/软笔两个页签，全局共享）：镜像另一个页签并回流主设置（MainWindow 落盘）→ 不关墨迹菜单（点击开关保持菜单打开）。</summary>
         private void ToggleSwitchEnablePauseInkToShape_Toggled(object sender, RoutedEventArgs e)
         {
             if (!isLoaded) return;
@@ -227,12 +227,10 @@ namespace InkCanvasForPDF.Board
                 if (ToggleSwitchEnablePauseInkToShape is { } hard) hard.IsOn = src.IsOn;
                 if (ToggleSwitchEnablePauseInkToShapeSoft is { } soft) soft.IsOn = src.IsOn;
                 RaisePauseInkToShapeChanged(src.IsOn);
-                // 切换停顿纠正即关闭墨迹菜单（对齐抬笔纠正同款行为，滑出动画）
-                PopupFlyAnimator.FlyOut(BoardPenPalettePopup, BoardPenPalette);
             }
         }
 
-        /// <summary>墨迹纠正开关（硬笔/软笔两个页签，全局共享）：镜像另一个页签并回流主设置（MainWindow 落盘）。</summary>
+        /// <summary>墨迹纠正开关（硬笔/软笔两个页签，全局共享）：镜像另一个页签并回流主设置（MainWindow 落盘）→ 不关墨迹菜单（与停顿纠正同款，保持菜单打开）。</summary>
         private void ToggleSwitchEnableInkToShape_Toggled(object sender, RoutedEventArgs e)
         {
             if (!isLoaded) return;
@@ -241,8 +239,6 @@ namespace InkCanvasForPDF.Board
                 if (ToggleSwitchEnableInkToShape is { } hard) hard.IsOn = src.IsOn;
                 if (ToggleSwitchEnableInkToShapeSoft is { } soft) soft.IsOn = src.IsOn;
                 RaiseInkToShapeChanged(src.IsOn);
-                // 切换墨迹纠正即关闭墨迹菜单（对齐画板"停顿纠正"同款行为，滑出动画）
-                PopupFlyAnimator.FlyOut(BoardPenPalettePopup, BoardPenPalette);
             }
         }
 

@@ -2,6 +2,7 @@
 
 using InkCanvasForPDF.Board.Helpers;
 using InkCanvasForPDF.Controls;
+using InkCanvasForPDF.Services;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -236,7 +237,7 @@ namespace InkCanvasForPDF.Board
             if (mode == 0 || !borders.TryGetValue(mode, out var hit)) return;
             // 强调色取 iNKORE 当前强调色（与画板按钮条高亮同源，随主题色设置生效）
             var accent = ThemeManager.Current.AccentColor
-                ?? (Color)ColorConverter.ConvertFromString("#0078D4");
+                ?? (Color)ColorConverter.ConvertFromString("#005FB0");
             var brush = new SolidColorBrush(accent);
             brush.Opacity = Math.Clamp(_boardBarOpacity, 0, 1);
             hit.Background = brush;
@@ -295,133 +296,154 @@ namespace InkCanvasForPDF.Board
         bool isWaitUntilNextTouchDown = false;
 
         bool isMouseDown = false;
+        bool isShapeFinishing = false;   // 抬笔完成流程进行中（含同步弹窗泵）：屏蔽绘制帧，防泵内 MouseMove 画幽灵帧删曲线/劫持 special
 
         // ICA MW_ShapeDrawing.cs:1487-1633 的形状部分（抬笔定型）；由 MW_BoardCore.inkCanvas_MouseUp 头部调用，
         // 其尾部（面积擦/移动/改色提交）保留在 MW_BoardCore 原位
         private void ShapeDrawing_MouseUp()
         {
-            if (drawingShapeMode == 5)
+            isShapeFinishing = true;
+            isMouseDown = false;   // 提前复位（原在方法尾）：同步弹窗泵期间任何 MouseMove 立即失效
+            try
             {
-                if (lastTempStroke != null)
+                if (drawingShapeMode == 5)
                 {
-                    Circle circle = new Circle(new Point(), 0, lastTempStroke);
-                    circle.R = GetDistance(circle.Stroke.StylusPoints[0].ToPoint(), circle.Stroke.StylusPoints[circle.Stroke.StylusPoints.Count / 2].ToPoint()) / 2;
-                    circle.Centroid = new Point((circle.Stroke.StylusPoints[0].X + circle.Stroke.StylusPoints[circle.Stroke.StylusPoints.Count / 2].X) / 2,
-                                                (circle.Stroke.StylusPoints[0].Y + circle.Stroke.StylusPoints[circle.Stroke.StylusPoints.Count / 2].Y) / 2);
-                    circles.Add(circle);
-                }
-                if (lastIsInMultiTouchMode)
-                {
-                    ToggleSwitchEnableMultiTouchMode.IsOn = true;
-                    lastIsInMultiTouchMode = false;
-                }
-            }
-            if (drawingShapeMode != 9 && drawingShapeMode != 0 && drawingShapeMode != 24 && drawingShapeMode != 25)
-            {
-                if (isLongPressSelected)
-                {
-
-                }
-                else
-                {
-                    BtnPen_Click(null, null); //画完一次还原到笔模式
-
+                    if (lastTempStroke != null)
+                    {
+                        Circle circle = new Circle(new Point(), 0, lastTempStroke);
+                        circle.R = GetDistance(circle.Stroke.StylusPoints[0].ToPoint(), circle.Stroke.StylusPoints[circle.Stroke.StylusPoints.Count / 2].ToPoint()) / 2;
+                        circle.Centroid = new Point((circle.Stroke.StylusPoints[0].X + circle.Stroke.StylusPoints[circle.Stroke.StylusPoints.Count / 2].X) / 2,
+                                                    (circle.Stroke.StylusPoints[0].Y + circle.Stroke.StylusPoints[circle.Stroke.StylusPoints.Count / 2].Y) / 2);
+                        circles.Add(circle);
+                    }
                     if (lastIsInMultiTouchMode)
                     {
                         ToggleSwitchEnableMultiTouchMode.IsOn = true;
                         lastIsInMultiTouchMode = false;
                     }
                 }
-            }
-            if (drawingShapeMode == 9)
-            {
-                if (isFirstTouchCuboid)
+                if (drawingShapeMode != 9 && drawingShapeMode != 0 && drawingShapeMode != 24 && drawingShapeMode != 25)
                 {
-                    if (CuboidStrokeCollection == null) CuboidStrokeCollection = new StrokeCollection();
-                    isFirstTouchCuboid = false;
-                    Point newIniP = new Point(Math.Min(CuboidFrontRectIniP.X, CuboidFrontRectEndP.X), Math.Min(CuboidFrontRectIniP.Y, CuboidFrontRectEndP.Y));
-                    Point newEndP = new Point(Math.Max(CuboidFrontRectIniP.X, CuboidFrontRectEndP.X), Math.Max(CuboidFrontRectIniP.Y, CuboidFrontRectEndP.Y));
-                    CuboidFrontRectIniP = newIniP;
-                    CuboidFrontRectEndP = newEndP;
-                    CuboidStrokeCollection.Add(lastTempStrokeCollection);
-                }
-                else
-                {
-                    BtnPen_Click(null, null); //画完还原到笔模式
-
-                    if (lastIsInMultiTouchMode)
+                    if (isLongPressSelected)
                     {
-                        ToggleSwitchEnableMultiTouchMode.IsOn = true;
-                        lastIsInMultiTouchMode = false;
+
                     }
-
-                    if (_currentCommitType == CommitReason.ShapeDrawing)
+                    else
                     {
+                        BtnPen_Click(null, null); //画完一次还原到笔模式
+
+                        if (lastIsInMultiTouchMode)
+                        {
+                            ToggleSwitchEnableMultiTouchMode.IsOn = true;
+                            lastIsInMultiTouchMode = false;
+                        }
+                    }
+                }
+                if (drawingShapeMode == 9)
+                {
+                    if (isFirstTouchCuboid)
+                    {
+                        if (CuboidStrokeCollection == null) CuboidStrokeCollection = new StrokeCollection();
+                        isFirstTouchCuboid = false;
+                        Point newIniP = new Point(Math.Min(CuboidFrontRectIniP.X, CuboidFrontRectEndP.X), Math.Min(CuboidFrontRectIniP.Y, CuboidFrontRectEndP.Y));
+                        Point newEndP = new Point(Math.Max(CuboidFrontRectIniP.X, CuboidFrontRectEndP.X), Math.Max(CuboidFrontRectIniP.Y, CuboidFrontRectEndP.Y));
+                        CuboidFrontRectIniP = newIniP;
+                        CuboidFrontRectEndP = newEndP;
                         CuboidStrokeCollection.Add(lastTempStrokeCollection);
-                        _currentCommitType = CommitReason.UserInput;
-                        timeMachine.CommitStrokeUserInputHistory(CuboidStrokeCollection);
-                        CuboidStrokeCollection = null;
                     }
-                }
-            }
-            if (drawingShapeMode == 24 || drawingShapeMode == 25)
-            {
-                if (drawMultiStepShapeCurrentStep == 0)
-                {
-                    drawMultiStepShapeCurrentStep = 1;
-                }
-                else
-                {
-                    drawMultiStepShapeCurrentStep = 0;
-                    if (drawMultiStepShapeSpecialStrokeCollection != null)
+                    else
                     {
-                        bool opFlag = false;
-                        switch (Settings.Canvas.HyperbolaAsymptoteOption)
-                        {
-                            case OptionalOperation.Yes:
-                                opFlag = true;
-                                break;
-                            case OptionalOperation.No:
-                                opFlag = false;
-                                break;
-                            case OptionalOperation.Ask:
-                                opFlag = MessageBox.Show("是否移除渐近线？", "InkCanvasForPDF", MessageBoxButton.YesNo) != MessageBoxResult.Yes;
-                                break;
-                        }
-                        if (!opFlag)
-                        {
-                            inkCanvas.Strokes.Remove(drawMultiStepShapeSpecialStrokeCollection);
-                        }
-                    }
-                    BtnPen_Click(null, null); //画完还原到笔模式
+                        BtnPen_Click(null, null); //画完还原到笔模式
 
-                    if (lastIsInMultiTouchMode)
-                    {
-                        ToggleSwitchEnableMultiTouchMode.IsOn = true;
-                        lastIsInMultiTouchMode = false;
+                        if (lastIsInMultiTouchMode)
+                        {
+                            ToggleSwitchEnableMultiTouchMode.IsOn = true;
+                            lastIsInMultiTouchMode = false;
+                        }
+
+                        if (_currentCommitType == CommitReason.ShapeDrawing)
+                        {
+                            CuboidStrokeCollection.Add(lastTempStrokeCollection);
+                            _currentCommitType = CommitReason.UserInput;
+                            timeMachine.CommitStrokeUserInputHistory(CuboidStrokeCollection);
+                            CuboidStrokeCollection = null;
+                        }
                     }
                 }
+                if (drawingShapeMode == 24 || drawingShapeMode == 25)
+                {
+                    if (drawMultiStepShapeCurrentStep == 0)
+                    {
+                        drawMultiStepShapeCurrentStep = 1;
+                    }
+                    else
+                    {
+                        drawMultiStepShapeCurrentStep = 0;
+                        var curve = lastTempStrokeCollection;   // 第二笔曲线集合快照（入口处仍在）
+                        ConsoleLog.Write("双曲线绘制", $"完成(画板): 曲线笔画={curve?.Count ?? 0}, 渐近线笔画={drawMultiStepShapeSpecialStrokeCollection?.Count ?? -1}, 画布笔画={inkCanvas.Strokes.Count}");
+                        if (drawMultiStepShapeSpecialStrokeCollection != null)
+                        {
+                            // 通用设置（AppSettings.hyperbolaAsymptoteOption，与 PDF 侧同一份）：0=保留 / 1=移除 / 2=询问（同步弹窗泵）
+                            bool keep = true;
+                            if (Vm is { } vm)
+                            {
+                                switch (vm.Settings.HyperbolaAsymptoteOption)
+                                {
+                                    case 1:
+                                        keep = false;
+                                        break;
+                                    case 2:
+                                        if (Window.GetWindow(this) is MainWindow mw)   // 与本文件 105/120 行同款取窗方式
+                                            keep = mw.AskKeepAsymptote();
+                                        break;
+                                }
+                            }
+                            if (!keep)
+                            {
+                                inkCanvas.Strokes.Remove(drawMultiStepShapeSpecialStrokeCollection);
+                            }
+                            // 自愈：保留/移除决定后曲线若已不在画布（根因未明的移除路径），提交历史前补回
+                            bool healed = false;
+                            if (curve is { Count: > 0 } && !inkCanvas.Strokes.Contains(curve[0]))
+                            {
+                                inkCanvas.Strokes.Add(curve);
+                                healed = true;
+                            }
+                            ConsoleLog.Write("双曲线绘制", $"结果(画板): 渐近线={(keep ? "保留" : "移除")}, 自愈={healed}, 画布笔画={inkCanvas.Strokes.Count}");
+                        }
+                        BtnPen_Click(null, null); //画完还原到笔模式
+
+                        if (lastIsInMultiTouchMode)
+                        {
+                            ToggleSwitchEnableMultiTouchMode.IsOn = true;
+                            lastIsInMultiTouchMode = false;
+                        }
+                    }
+                }
+                if (_currentCommitType == CommitReason.ShapeDrawing && drawingShapeMode != 9)
+                {
+                    _currentCommitType = CommitReason.UserInput;
+                    StrokeCollection? collection = null;
+                    if (lastTempStrokeCollection != null && lastTempStrokeCollection.Count > 0)
+                    {
+                        collection = lastTempStrokeCollection;
+                    }
+                    else if (lastTempStroke != null)
+                    {
+                        collection = new StrokeCollection() { lastTempStroke };
+                    }
+                    if (collection != null)
+                    {
+                        timeMachine.CommitStrokeUserInputHistory(collection);
+                    }
+                }
+                lastTempStroke = null;
+                lastTempStrokeCollection = null;
             }
-            isMouseDown = false;
-            if (_currentCommitType == CommitReason.ShapeDrawing && drawingShapeMode != 9)
+            finally
             {
-                _currentCommitType = CommitReason.UserInput;
-                StrokeCollection? collection = null;
-                if (lastTempStrokeCollection != null && lastTempStrokeCollection.Count > 0)
-                {
-                    collection = lastTempStrokeCollection;
-                }
-                else if (lastTempStroke != null)
-                {
-                    collection = new StrokeCollection() { lastTempStroke };
-                }
-                if (collection != null)
-                {
-                    timeMachine.CommitStrokeUserInputHistory(collection);
-                }
+                isShapeFinishing = false;
             }
-            lastTempStroke = null;
-            lastTempStrokeCollection = null;
         }
 
         // ICA MW_ShapeDrawing.cs:1635-1642（画板版覆盖 MW_BoardCore 的恒 true 裁剪版）
@@ -462,6 +484,7 @@ namespace InkCanvasForPDF.Board
 
         private void MouseTouchMove(Point endP)
         {
+            if (isShapeFinishing) return;   // 完成流程（含同步弹窗泵）期间屏蔽一切绘制帧
             List<System.Windows.Point> pointList;
             StylusPointCollection point;
             Stroke stroke;
@@ -918,8 +941,9 @@ namespace InkCanvasForPDF.Board
                                 strokes.Add(stroke.Clone());
                             }
                         }
-                        catch
+                        catch (Exception ex)
                         {
+                            App.Log("Hyperbola.Curve", ex);   // 生成异常只进 error.log（log 只存错误）
                             return;
                         }
                     }

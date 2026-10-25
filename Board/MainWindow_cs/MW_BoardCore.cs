@@ -94,7 +94,9 @@ namespace InkCanvasForPDF.Board
             c.DisplayScale = 1.0;   // 画板墨迹面无整层缩放变换
             c.PressureEnabled = _pressureEnabled;
             c.GrowMs = TimePenGrowMs;
-            bool inkMode = isInMultiTouchMode || inkCanvas.EditingMode == InkCanvasEditingMode.Ink;
+            // 书写模式 = 画笔工具 + 非形状手绘；橡皮/选择/形状一律视为非书写，时间笔锋整体不介入
+            bool penMode = !forceEraser && drawingShapeMode == 0;
+            bool inkMode = penMode && (isInMultiTouchMode || inkCanvas.EditingMode == InkCanvasEditingMode.Ink);
             bool armed = Settings.Canvas.InkStyle == 3
                          && inkColor <= 100
                          && inkMode;
@@ -105,13 +107,13 @@ namespace InkCanvasForPDF.Board
                           && inkColor <= 100
                           && inkMode;
             c.SetShieldArmed(shield);
-            // 多触摸模式：全部设备交叠加层绘制（触摸不再走 StrokeVisual 湿墨）；数位笔抬笔仍由原生提交
-            c.SelfDrawAllDevices = isInMultiTouchMode;
+            // 多触摸模式：全部设备交叠加层绘制（触摸不再走 StrokeVisual 湿墨）；数位笔抬笔仍由原生提交。
+            // 必须带 penMode：橡皮/选择/形状下不能采集，否则边擦边写。
+            c.SelfDrawAllDevices = isInMultiTouchMode && penMode;
             c.MultiDeviceEnabled = false;
-            // 关闭笔锋（InkStyle=2）+ 硬笔：等宽交 WPF 渲染层开关 IgnorePressure（不再抬笔归一）；
-            // 荧光笔豁免（不参与笔锋/归一路径），软笔恒 false（真压感照旧）。
+            // 等宽：荧光笔无笔锋 → 一律忽略硬件压力；关闭笔锋(2)+硬笔同样走 WPF 渲染层开关（不再抬笔归一）
             inkCanvas.DefaultDrawingAttributes.IgnorePressure =
-                Settings.Canvas.InkStyle == 2 && !_pressureEnabled && inkColor <= 100;
+                inkColor > 100 || (Settings.Canvas.InkStyle == 2 && !_pressureEnabled);
         }
 
         private void loadPenCanvas()
@@ -210,7 +212,7 @@ namespace InkCanvasForPDF.Board
                 Brush normal = BoardBarBackgroundBrush;
                 // 选中高亮：强调色 25% 混白（浅）/混黑（深），取 iNKORE 当前强调色（与 PDF 墨迹栏同源，随主题色设置生效）
                 var accent = ThemeManager.Current.AccentColor
-                             ?? (Color)ColorConverter.ConvertFromString("#0078D4");
+                             ?? (Color)ColorConverter.ConvertFromString("#005FB0");
                 byte Mix(byte v, bool dark) => dark ? (byte)(v * 3 / 4) : (byte)((v * 3 + 255) / 4);
                 Brush checkedBrush = Services.ThemeService.IsDark
                     ? new SolidColorBrush(Color.FromRgb(Mix(accent.R, true), Mix(accent.G, true), Mix(accent.B, true)))
@@ -419,13 +421,14 @@ namespace InkCanvasForPDF.Board
 
         // ═══ 画板图标按钮杂项（ICA MW_FloatBarIcons.cs / MW_Settings.cs 移植）═══
 
-        // ICA SymbolIconDelete_MouseUp:273-291（PPT 截图分支裁剪）
-        private void SymbolIconDelete_MouseUp(object sender, RoutedEventArgs e)
+        // ICA SymbolIconDelete_MouseUp:273-291（PPT 截图分支裁剪）；返回是否实际移除了笔画（供清空滑块决定切换模式/关菜单）
+        private bool SymbolIconDelete_MouseUp(object sender, RoutedEventArgs e)
         {
             if (inkCanvas.GetSelectedStrokes().Count > 0)
             {
                 inkCanvas.Strokes.Remove(inkCanvas.GetSelectedStrokes());
                 GridInkCanvasSelectionCover.Visibility = Visibility.Collapsed;
+                return true;
             }
             else if (inkCanvas.Strokes.Count > 0)
             {
@@ -434,7 +437,9 @@ namespace InkCanvasForPDF.Board
                     SaveScreenshot(true);
                 }
                 BtnClear_Click(null, null);
+                return true;
             }
+            return false;
         }
 
         // ICA MW_Settings.cs ComboBoxTheme_SelectionChanged：画板主题下拉（亮暗色板切换）

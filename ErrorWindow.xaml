@@ -1,0 +1,79 @@
+<Window x:Class="InkCanvasForPDF.ErrorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ic="clr-namespace:FluentIcons.Wpf;assembly=FluentIcons.Wpf"
+        xmlns:ui="http://schemas.inkore.net/lib/ui/wpf/modern"
+        Title="出错了"
+        SizeToContent="WidthAndHeight"
+        ResizeMode="CanMinimize"
+        WindowStartupLocation="CenterScreen"
+        Icon="Resources/app.ico"
+        Background="{DynamicResource AppBackgroundBrush}"
+        ui:WindowHelper.UseModernWindowStyle="True"
+        ui:WindowHelper.SystemBackdropType="Mica"
+        ui:TitleBar.IsBackButtonVisible="False"
+        ui:TitleBar.IsIconVisible="True">
+
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 标题 -->
+        <TextBlock Grid.Row="0"
+                   Text="唔去，出错了😭"
+                   FontSize="20"
+                   FontWeight="SemiBold"
+                   Foreground="{DynamicResource ToolbarForegroundBrush}"/>
+
+        <!-- 副标题 -->
+        <TextBlock Grid.Row="1"
+                   Text="您可以复制以下信息给开发者"
+                   FontSize="13"
+                   Margin="0,4,0,12"
+                   Foreground="{DynamicResource ToolbarForegroundBrush}"/>
+
+        <!-- 错误详情：固定 500x500、只读可选中、不自动换行 -->
+        <TextBox x:Name="ErrorTextBox"
+                 Grid.Row="2"
+                 Width="500"
+                 Height="500"
+                 TextWrapping="NoWrap"
+                 AcceptsReturn="False"
+                 IsReadOnly="True"
+                 IsReadOnlyCaretVisible="True"
+                 IsUndoEnabled="True"
+                 IsInactiveSelectionHighlightEnabled="False"
+                 SelectionOpacity="0.4"
+                 VerticalScrollBarVisibility="Auto"
+                 HorizontalScrollBarVisibility="Hidden"
+                 FontSize="12"/>
+
+        <!-- 紧接输入框下方一行：超链接靠左、强调复制按钮靠右 -->
+        <Grid Grid.Row="3" Width="500" Margin="0,8,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0" VerticalAlignment="Center">
+                <Hyperlink Tag="https://github.com/Eason-2012/InkCanvasForPDF/issues/new"
+                           Click="ReportIssue_Click">向开发者报告问题</Hyperlink>
+            </TextBlock>
+
+            <Button Grid.Column="1"
+                    MinWidth="108"
+                    HorizontalAlignment="Right"
+                    Style="{DynamicResource {x:Static ui:ThemeKeys.AccentButtonStyleKey}}"
+                    Click="Copy_Click">
+                <StackPanel Orientation="Horizontal">
+                    <ic:FluentIcon Icon="Copy" IconVariant="Regular" FontSize="16" Margin="0,0,8,0"/>
+                    <TextBlock Text="复制信息"/>
+                </StackPanel>
+            </Button>
+        </Grid>
+    </Grid>
+</Window>

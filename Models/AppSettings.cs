@@ -69,6 +69,14 @@ public class AppSettings
     [JsonPropertyName("eraserModeByStrokeSetting")]
     public bool EraserModeByStrokeSetting { get; set; } = false;
 
+    /// <summary>清空墨迹后自动切换模式（PDF 橡皮菜单滑动清空）：0=保持在橡皮，1=切换到鼠标，2=切换到墨迹，3=切换到选择。默认 1=鼠标。</summary>
+    [JsonPropertyName("clearInkAutoSwitchMode")]
+    public int ClearInkAutoSwitchMode { get; set; } = 1;
+
+    /// <summary>画板橡皮菜单滑动清空后自动切换模式，取值同上；默认 2=墨迹（与画板清屏前先回画笔的既有行为一致）。与 PDF 侧不互通。</summary>
+    [JsonPropertyName("boardClearInkAutoSwitchMode")]
+    public int BoardClearInkAutoSwitchMode { get; set; } = 2;
+
     /// <summary>手掌擦除：书写模式下大面积接触（手掌）触发面积擦（仅 EraseByPoint，尺寸=触点宽×k）。PDF 与画板共享。默认启用。</summary>
     [JsonPropertyName("isPalmEraseEnabled")]
     public bool IsPalmEraseEnabled { get; set; } = true;
@@ -109,9 +117,9 @@ public class AppSettings
     [JsonPropertyName("inkAlpha")]
     public int InkAlpha { get; set; } = 120;
 
-    /// <summary>调色盘主题：true=亮系，false=暗系。</summary>
+    /// <summary>调色盘主题：true=亮系，false=暗系（默认暗系）。</summary>
     [JsonPropertyName("useLightThemeColor")]
-    public bool UseLightThemeColor { get; set; } = true;
+    public bool UseLightThemeColor { get; set; } = false;
 
     /// <summary>颜色主题：0=浅色，1=深色，2=跟随系统（抄 ICA Settings.Appearance.Theme；默认跟随系统）。</summary>
     [JsonPropertyName("theme")]
@@ -121,9 +129,13 @@ public class AppSettings
     [JsonPropertyName("isShapePanelPinned")]
     public bool IsShapePanelPinned { get; set; } = false;
 
-    /// <summary>应用强调色（hex，如 #0078D4；作用于 iNKORE 控件选中态/开关/滑块）。</summary>
+    /// <summary>保留双曲线渐近线（PDF 与画板通用）：0=是（保留）、1=否（画完即移除）、2=每次询问。</summary>
+    [JsonPropertyName("hyperbolaAsymptoteOption")]
+    public int HyperbolaAsymptoteOption { get; set; } = 2;   // 默认每次询问（对齐画板旧默认 Ask）
+
+    /// <summary>应用强调色（hex，如 #005FB0；作用于 iNKORE 控件选中态/开关/滑块）。</summary>
     [JsonPropertyName("accentColor")]
-    public string AccentColor { get; set; } = "#0078D4";
+    public string AccentColor { get; set; } = "#005FB0";
 
     /// <summary>PDF 墨迹栏缩放（0.5~1.5，应用到 ViewboxFloatingBarScaleTransform）。</summary>
     [JsonPropertyName("viewboxFloatingBarScale")]

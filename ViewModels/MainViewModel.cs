@@ -101,8 +101,9 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>顶部工具栏是否可见（有 PDF 且未打开设置；与回到主页一致：进设置即隐藏工具栏）。</summary>
-    public bool IsToolbarVisible => HasPdf && !IsSettingsVisible;
+    /// <summary>顶部工具栏是否可见（有 PDF、未打开设置、不在打开加载中；与回到主页一致：进设置即隐藏工具栏；
+    /// 加载页为纯云母，白色顶栏在此期间必须隐藏）。</summary>
+    public bool IsToolbarVisible => HasPdf && !IsSettingsVisible && !IsOpeningPdf;
 
     private string _pdfName = string.Empty;
 
@@ -133,7 +134,10 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         set
         {
             if (SetField(ref _isOpenOpeningPdf, value))
+            {
                 OnPropertyChanged(nameof(WindowTitle));
+                OnPropertyChanged(nameof(IsToolbarVisible));
+            }
         }
     }
 
@@ -204,14 +208,14 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
 
     private double _zoomLevel = 1.0;
 
-    /// <summary>页面缩放级别（0.5x ~ 4x）。缩放过程中仅由 ScaleTransform 即时缩放（禁止清晰渲染），
+    /// <summary>页面缩放级别（0.25x ~ 4x）。缩放过程中仅由 ScaleTransform 即时缩放（禁止清晰渲染），
     /// 停止 50ms 后清晰当前页一次，1s 无操作后释放 hi 内存。</summary>
     public double ZoomLevel
     {
         get => _zoomLevel;
         set
         {
-            if (SetField(ref _zoomLevel, Math.Clamp(value, 0.5, 4.0)))
+            if (SetField(ref _zoomLevel, Math.Clamp(value, 0.25, 4.0)))
             {
                 OnPropertyChanged(nameof(DisplayScale));
                 ScheduleSharpen();
@@ -404,6 +408,9 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         IsOpeningPdf = true;   // 先显示加载页（不透明全屏，同时天然阻断再次点击）
         try
         {
+            ConsoleLog.Write("PDF打开", $"开始: {path}");
+            var stopwatch = Stopwatch.StartNew();
+
             // 切换文档：先 flush 旧库（首次打开 InkStore 为 null，处理器内自判），随后置空防串写
             DocumentClosing?.Invoke();
             InkStore = null;
@@ -426,6 +433,8 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
                     thumbSizes[i] = _pdf.GetPageSize(i, ThumbnailWidth);
 
                 var store = autoSave ? InkStoreService.TryOpen(path) : null;
+                if (!autoSave)
+                    ConsoleLog.Write("PDF打开", "墨迹恢复: 自动保存关闭，跳过哈希验证");
                 var pageInks = store?.LoadPages() ?? new Dictionary<int, byte[]>();
                 var boardSlots = store?.LoadBoardSlots() ?? new Dictionary<int, byte[]>();
                 var viewState = store?.LoadViewState() ?? new Dictionary<string, string>();
@@ -466,12 +475,16 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
                     GoToPage(page);
 
                 // 位置恢复后再等首屏可见页位图就位，才撤加载页（成功路径唯一出口；含超时兜底）
+                stopwatch.Stop();
+                ConsoleLog.Write("PDF打开",
+                    $"打开成功: 页数={_pdf.PageCount}, 恢复墨迹页={sizes.pageInks.Count}, 画板槽={sizes.boardSlots.Count}, 耗时={stopwatch.ElapsedMilliseconds}ms");
                 BeginWaitFirstScreenReady();
             }));
         }
         catch (Exception ex)
         {
             IsOpeningPdf = false;   // 失败路径撤加载页（成功路径由首屏就绪轮询撤），再弹错误框
+            ConsoleLog.Write("PDF打开", $"打开失败: {ex}");
             App.Log("OpenPdfFile", ex);
             MessageBox.Show($"PDF 打开失败：{ex.Message}", "InkCanvasForPDF",
                 MessageBoxButton.OK, MessageBoxImage.Error);
@@ -748,10 +761,10 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         return dominant;
     }
 
-    /// <summary>按固定倍率缩放（自动夹在 0.5x~4x）。返回是否发生实际变化（clamp 边界时为 false）。</summary>
+    /// <summary>按固定倍率缩放（自动夹在 0.25x~4x）。返回是否发生实际变化（clamp 边界时为 false）。</summary>
     public bool ZoomBy(double factor)
     {
-        double next = Math.Clamp(_zoomLevel * factor, 0.5, 4.0);
+        double next = Math.Clamp(_zoomLevel * factor, 0.25, 4.0);
         if (Math.Abs(next - _zoomLevel) < 1e-9)
             return false;
         ZoomLevel = next;

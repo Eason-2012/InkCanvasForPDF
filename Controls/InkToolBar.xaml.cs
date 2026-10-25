@@ -351,17 +351,15 @@ public void ApplyFloatBarText(bool show)
         else if (_floatBarTextVisible)
         {
             // 开文字注释：纯强调色实色（不再与白/黑混 50%）
-            check = (Color)ColorConverter.ConvertFromString(Vm?.Settings.AccentColor ?? "#0078D4");
+            check = (Color)ColorConverter.ConvertFromString(Vm?.Settings.AccentColor ?? "#005FB0");
         }
         else
             check = Services.ThemeService.IsDark ? Color.FromRgb(0x52, 0x52, 0x52)
                                                  : Color.FromRgb(0xD6, 0xDA, 0xE0);
         var pillVisible = !_floatBarTextVisible && !colorful ? Visibility.Visible : Visibility.Collapsed;
-        // 选中色画刷：非彩色时跟随浮动栏不透明度（背景画刷级半透明，选中块同步透出下层）；
-        // 彩色背景为固定 alpha 渐变，保持不透明。CheckBorder.Opacity=0.99 仅激活态合成约定，视觉≈1。
+        // 选中色画刷：恒为实心，不跟随栏不透明度（栏透明度只作用于背景画刷）；
+        // CheckBorder.Opacity=0.99 仅激活态合成约定，视觉≈1。
         var checkBrush = new SolidColorBrush(check);
-        if (!colorful)
-            checkBrush.Opacity = Math.Clamp(Vm?.Settings.FloatingBarOpacity ?? 1, 0, 1);
         // 纯强调色选中态（开文字注释、非彩色）：选中项图标/文字反色——浅色主题显白、深色主题显黑。
         // 经 CheckBorder.Resources 本地覆盖 FloatBarIconForeground，其子树 DynamicResource（图标+文字）优先命中；
         // 复位段 Resources.Remove 即恢复主题前景。
@@ -782,12 +780,30 @@ public void ApplyFloatBarText(bool show)
             CompleteClearInk();
     }
 
-    /// <summary>滑到底：清空当前显示页墨迹（MainWindow 统一入口，绕面积擦累加器并登记可撤销历史），随即回左。</summary>
+    /// <summary>滑到底：清空当前显示页墨迹（MainWindow 统一入口，绕面积擦累加器并登记可撤销历史），随即回左。
+    /// 仅在成功清空时按设置自动切换编辑模式并关闭橡皮菜单（未成功：滑块回弹、菜单保持打开）。</summary>
     private void CompleteClearInk()
     {
+        bool cleared = false;
         if (Window.GetWindow(this) is MainWindow mainWindow)
-            mainWindow.ClearCurrentPageInk();
+            cleared = mainWindow.ClearCurrentPageInk();
         AnimateClearInkBack();
+        if (!cleared || Vm is not { } vm) return;
+
+        switch (vm.Settings.ClearInkAutoSwitchMode)
+        {
+            case 1:   // 切换到鼠标
+                CursorIcon_Click(null!, null!);
+                break;
+            case 2:   // 切换到墨迹（清空时 ActiveTool=Eraser，必走切模式分支，不会误开墨迹菜单）
+                PenIcon_Click(null!, null!);
+                break;
+            case 3:   // 切换到选择
+                SelectIcon_Click(null!, null!);
+                break;
+            // case 0 = 保持在橡皮：不切
+        }
+        PopupFlyAnimator.FlyOut(EraserPalette, EraserPaletteRoot);   // 成功清空即关橡皮菜单（滑出动画，幂等）
     }
 
     /// <summary>回弹到初始位：文字立即复原，滑块 160ms EaseOut 滑回（无淡入）。</summary>
@@ -978,7 +994,7 @@ public void ApplyFloatBarText(bool show)
         SaveInkOptions();
     }
 
-    /// <summary>多指书写开关（三页签共享）：写 VM → 三开关互同步 → 持久化 → 关墨迹菜单。</summary>
+    /// <summary>多指书写开关（三页签共享）：写 VM → 三开关互同步 → 持久化 → 不关墨迹菜单（点击开关保持菜单打开）。</summary>
     private void ToggleSwitchEnableMultiFingerInk_Toggled(object sender, RoutedEventArgs e)
     {
         if (sender is iNKORE.UI.WPF.Modern.Controls.ToggleSwitch ts && Vm != null)
@@ -989,11 +1005,10 @@ public void ApplyFloatBarText(bool show)
             if (ToggleSwitchEnableMultiFingerInkSoft is { } b) b.IsOn = ts.IsOn;
             if (ToggleSwitchEnableMultiFingerInkHighlighter is { } c) c.IsOn = ts.IsOn;
             SaveInkOptions();
-            PopupFlyAnimator.FlyOut(PenPalette, PenPaletteRoot);   // 切换即关闭墨迹菜单（滑出动画）
         }
     }
 
-    /// <summary>墨迹纠正开关（硬笔/软笔两个页签，全局共享）：写 VM → 同步两个开关 → 持久化 → 关墨迹菜单。</summary>
+    /// <summary>墨迹纠正开关（硬笔/软笔两个页签，全局共享）：写 VM → 同步两个开关 → 持久化 → 不关墨迹菜单（与多指书写同款，保持菜单打开）。</summary>
     private void ToggleSwitchEnableInkToShape_Toggled(object sender, RoutedEventArgs e)
     {
         if (sender is iNKORE.UI.WPF.Modern.Controls.ToggleSwitch ts && Vm != null)
@@ -1003,7 +1018,6 @@ public void ApplyFloatBarText(bool show)
             if (ToggleSwitchEnableInkToShapeHard is { } a) a.IsOn = ts.IsOn;
             if (ToggleSwitchEnableInkToShapeSoft is { } b) b.IsOn = ts.IsOn;
             SaveInkOptions();
-            PopupFlyAnimator.FlyOut(PenPalette, PenPaletteRoot);   // 与多指书写同款：切换即关闭墨迹菜单（滑出动画）
         }
     }
 

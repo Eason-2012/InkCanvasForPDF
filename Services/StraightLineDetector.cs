@@ -18,13 +18,16 @@ internal static class StraightLineDetector
     private const int MaxSamplePoints = 64;
 
     /// <summary>判定单笔墨迹是否为近似直线并产出规范直线匹配。
-    /// <paramref name="minLength"/> 为最短首尾弦长（宿主传入 = 100 × DisplayScale，对齐三角/四边形跨度惯例）。
+    /// <paramref name="minLength"/> 为最短首尾弦长（宿主传入 = 100 ÷ DisplayScale，屏幕口径恒定，对齐三角/四边形跨度惯例）。
     /// 命中返回 ShapeName="Line"、HotPoints=[起点,终点] 的 InkShapeMatch；未命中返回 null。</summary>
     internal static InkShapeMatch? TryDetectLine(Stroke stroke, double minLength)
     {
         var stylusPoints = stroke.StylusPoints;
         if (stylusPoints == null || stylusPoints.Count < MinPointCount)
+        {
+            ConsoleLog.Write("墨迹纠正", $"直线未命中: 点数不足 ({stylusPoints?.Count ?? 0} < {MinPointCount})");
             return null;
+        }
 
         // 首尾弦长门槛
         Point first = stylusPoints[0].ToPoint();
@@ -33,7 +36,11 @@ internal static class StraightLineDetector
         double chordY = last.Y - first.Y;
         double chord = Math.Sqrt(chordX * chordX + chordY * chordY);
         if (chord < minLength)
+        {
+            ConsoleLog.Write("墨迹纠正", $"直线未命中: 弦长不足 ({chord:F0} < {minLength:F0})");
             return null;
+        }
+        ConsoleLog.Write("墨迹纠正", $"直线弦长过门: 弦长={chord:F0}, 门槛={minLength:F0}");
 
         // 均匀降采样
         int count = stylusPoints.Count;
@@ -42,7 +49,10 @@ internal static class StraightLineDetector
         for (int i = 0; i < count; i += step)
             points.Add(stylusPoints[i].ToPoint());
         if (points.Count < MinPointCount)
+        {
+            ConsoleLog.Write("墨迹纠正", $"直线未命中: 降采样后点数不足 ({points.Count} < {MinPointCount})");
             return null;
+        }
 
         // 中心化 + 协方差（等比缩放不影响解释方差比，不做归一化）
         double meanX = 0, meanY = 0;
@@ -75,8 +85,12 @@ internal static class StraightLineDetector
             return null;   // 所有点重合（退化）
 
         // 判定：主方向解释的方差占比达标才视为直线
-        if (lambdaMax / total < ExplainedVarianceThreshold)
+        double ratio = lambdaMax / total;
+        if (ratio < ExplainedVarianceThreshold)
+        {
+            ConsoleLog.Write("墨迹纠正", $"直线未命中: 方差比不足 ({ratio:F4} < {ExplainedVarianceThreshold:F4})");
             return null;
+        }
 
         // 主方向单位向量：(A − λI)v = 0 → v = (covXY, λmax − covXX)；协方差无交叉项时按主轴对齐
         double dirX, dirY;
@@ -106,10 +120,15 @@ internal static class StraightLineDetector
             if (t > maxT) maxT = t;
         }
         if (maxT - minT < minLength)
+        {
+            ConsoleLog.Write("墨迹纠正", $"直线未命中: 投影长度不足 ({maxT - minT:F0} < {minLength:F0})");
             return null;   // 投影长度复检（首尾弦可能因端点抖动虚高）
+        }
 
         var start = new Point(meanX + dirX * minT, meanY + dirY * minT);
         var end = new Point(meanX + dirX * maxT, meanY + dirY * maxT);
+
+        ConsoleLog.Write("墨迹纠正", $"直线命中: 弦长={chord:F0}, 解释方差比={ratio:F4}");
 
         double width = Math.Abs(end.X - start.X);
         double height = Math.Abs(end.Y - start.Y);

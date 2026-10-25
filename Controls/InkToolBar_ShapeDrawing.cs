@@ -162,6 +162,13 @@ public partial class InkToolBar
         vm.InkTool.SetActiveTool(InkToolMode.Pen);   // 内部会先清 ShapeDrawMode，须再设回
         vm.InkTool.IsShapeLongPressSelected = _isLongPressSelected;
         vm.InkTool.ShapeDrawMode = mode;   // 高亮由 InkToolBar 的 ShapeDrawMode 订阅统一驱动（对齐画板）
+        if (mode == 24 || mode == 25)
+        {
+            // ICA BtnDrawHyperbola_Click / WithFocalPoint L381/393：选中双曲线类形状即复位两笔状态机
+            // （防上一次只画第一笔中止后 step 残留 1，下一次第一笔抬笔被误判为完成分支）
+            if (Window.GetWindow(this) is MainWindow mw)
+                mw.ResetHyperbolaStep();
+        }
         if (!_shapePanelPinned)
             CollapseBorderDrawShape();
     }
@@ -229,7 +236,7 @@ public partial class InkToolBar
 
         if (mode == 0 || !borders.TryGetValue(mode, out var hit)) return;
         var brush = new SolidColorBrush(
-            (Color)ColorConverter.ConvertFromString(Vm?.Settings.AccentColor ?? "#0078D4"));
+            (Color)ColorConverter.ConvertFromString(Vm?.Settings.AccentColor ?? "#005FB0"));
         brush.Opacity = Math.Clamp(Vm?.Settings.FloatingBarOpacity ?? 1, 0, 1);
         hit.Background = brush;
     }

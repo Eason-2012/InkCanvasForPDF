@@ -12,9 +12,11 @@
     <SolidColorBrush x:Key="PressedBackgroundBrush" Color="#D5D5D5"/>
     <SolidColorBrush x:Key="ItemHoverBackgroundBrush" Color="#F0F0F0"/>
     <SolidColorBrush x:Key="CardBackgroundBrush" Color="White"/>
+    <!-- 缩略图侧栏半透明白底：透出窗口云母背景（磨砂侧栏效果） -->
+    <SolidColorBrush x:Key="ThumbnailPanelTranslucentBrush" Color="#CCFFFFFF"/>
     <SolidColorBrush x:Key="CardBorderBrush" Color="#DCDCE0"/>
     <SolidColorBrush x:Key="SecondaryForegroundBrush" Color="#666666"/>
-    <SolidColorBrush x:Key="AccentBrush" Color="#0078D4"/>
+    <SolidColorBrush x:Key="AccentBrush" Color="#005FB0"/>
 
     <!-- 墨迹浮动栏画刷（浅色值 = 原 InkToolBar.xaml 本地定义） -->
     <SolidColorBrush x:Key="FloatBarBackground" Opacity="0.75" Color="#F5F5F7"/>

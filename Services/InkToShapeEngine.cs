@@ -41,7 +41,8 @@ public sealed class InkToShapeEngine
     /// <summary>停顿强制识别相似度门槛（与普通识别 <see cref="SimilarityThreshold"/> 相互独立；宿主注入 = 停顿灵敏度滑块 / 100）。</summary>
     public double PauseSimilarityThreshold { get; set; } = 0.75;
 
-    /// <summary>显示缩放：ICA 的尺寸阈值（75/100）按屏幕像素换算到画布坐标；画板无整层缩放，恒 1。</summary>
+    /// <summary>显示缩放：尺寸阈值（75/100）保持屏幕像素口径恒定——门槛 = 常量 ÷ DisplayScale
+    /// （放大时页面门槛变小，屏幕严格度不变）；画板无整层缩放，恒 1。</summary>
     public double DisplayScale { get; set; } = 1.0;
 
     /// <summary>收笔入口（宿主在笔画收集事件里调用）。</summary>
@@ -93,37 +94,49 @@ public sealed class InkToShapeEngine
             var match = await WinRtInkShapeRecognizer.RecognizeAsync(_recent, stroke).ConfigureAwait(true);
             if (match == null || !ReferenceEquals(target, _batchTarget))
             {
+                ConsoleLog.Write("停顿墨迹纠正", match == null ? "未识别" : "目标画布已切换，放弃本轮");
                 return false;
             }
 
             var replacement = BuildReplacement(match);
             if (replacement == null || replacement.Count == 0)
             {
+                ConsoleLog.Write("停顿墨迹纠正", $"替换为空 ({match.ShapeName})");
                 return false;
             }
 
             double similarity = ComputeSimilarity(match, replacement);
             if (similarity < PauseSimilarityThreshold)
             {
+                ConsoleLog.Write("停顿墨迹纠正", $"相似度不足: {similarity:F2} < {PauseSimilarityThreshold:F2} ({match.ShapeName})");
                 return false;
             }
 
             // 识别期间用户可能已擦除/撤销：任一相关笔画已不在画布则放弃本轮
             if (!target.Contains(stroke))
+            {
+                ConsoleLog.Write("停顿墨迹纠正", "笔画已不在画布，放弃本轮");
                 return false;
+            }
             foreach (Stroke matched in match.Strokes)
             {
                 if (!target.Contains(matched))
+                {
+                    ConsoleLog.Write("停顿墨迹纠正", "关联笔画已不在画布，放弃本轮");
                     return false;
+                }
             }
 
             _apply(target, match.Strokes, replacement);
+            ConsoleLog.Write("停顿墨迹纠正",
+                $"替换: {match.ShapeName}, 相似度={similarity:F2}, 移除={match.Strokes.Count}, 新增={replacement.Count}");
             _recent.Clear();
             Prune(target);
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            ConsoleLog.Write("停顿墨迹纠正", $"停顿识别异常: {ex}");
             return false;   // 停顿强制识别属书写增强：任何异常放弃本轮，保留手绘笔画
         }
         finally
@@ -169,22 +182,25 @@ public sealed class InkToShapeEngine
             {
                 // 先 WinRT 后直线：未命中封闭图形时对临时笔画做直线拉直检测（隶属墨迹纠正，跟随停顿识别链路）
                 double lineScale = DisplayScale > 0 ? DisplayScale : 1.0;
-                match = StraightLineDetector.TryDetectLine(provisional, 100 * lineScale);
+                match = StraightLineDetector.TryDetectLine(provisional, 100 / lineScale);
             }
             if (match == null || !ReferenceEquals(target, _batchTarget))
             {
+                ConsoleLog.Write("停顿墨迹纠正", match == null ? "未识别" : "目标画布已切换，放弃本轮");
                 return false;
             }
 
             var replacement = BuildReplacement(match);
             if (replacement == null || replacement.Count == 0)
             {
+                ConsoleLog.Write("停顿墨迹纠正", $"替换为空 ({match.ShapeName})");
                 return false;
             }
 
             double similarity = ComputeSimilarity(match, replacement);
             if (similarity < PauseSimilarityThreshold)
             {
+                ConsoleLog.Write("停顿墨迹纠正", $"相似度不足: {similarity:F2} < {PauseSimilarityThreshold:F2} ({match.ShapeName})");
                 return false;
             }
 
@@ -194,12 +210,16 @@ public sealed class InkToShapeEngine
             {
                 real = commitReal();
             }
-            catch
+            catch (Exception ex)
             {
+                ConsoleLog.Write("停顿墨迹纠正", $"断笔提交异常: {ex}");
                 return false;   // 提交失败保留在绘笔画，交回宿主管线
             }
             if (real == null || !target.Contains(real))
+            {
+                ConsoleLog.Write("停顿墨迹纠正", "断笔提交失败: 无有效笔画或已不在画布");
                 return false;
+            }
 
             // 待移除集合：match.Strokes 里的临时笔画换成真实笔画；真实笔画缺失时补入（防墨迹与图形重叠残留）
             var toRemove = new StrokeCollection();
@@ -212,12 +232,15 @@ public sealed class InkToShapeEngine
                 toRemove.Add(real);
 
             _apply(target, toRemove, replacement);
+            ConsoleLog.Write("停顿墨迹纠正",
+                $"试识别替换: {match.ShapeName}, 相似度={similarity:F2}, 移除={toRemove.Count}, 新增={replacement.Count}");
             _recent.Clear();
             Prune(target);
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            ConsoleLog.Write("停顿墨迹纠正", $"停顿试识别异常: {ex}");
             return false;   // 停顿强制识别属书写增强：任何异常放弃本轮，保留手绘笔画
         }
         finally
@@ -253,19 +276,27 @@ public sealed class InkToShapeEngine
             if (match == null)
             {
                 // 先 WinRT 后直线：未命中封闭图形时对刚收笔这一笔做直线拉直检测（隶属墨迹纠正，跟随 Enabled 开关）
+                ConsoleLog.Write("抬笔墨迹纠正", "WinRT未命中 → 直线检测");
                 double lineScale = DisplayScale > 0 ? DisplayScale : 1.0;
-                match = StraightLineDetector.TryDetectLine(stroke, 100 * lineScale);
+                match = StraightLineDetector.TryDetectLine(stroke, 100 / lineScale);
             }
             if (match == null || !Enabled || !ReferenceEquals(target, _batchTarget))
                 return;
 
             var replacement = BuildReplacement(match);
             if (replacement == null || replacement.Count == 0)
+            {
+                ConsoleLog.Write("抬笔墨迹纠正", $"替换为空 ({match.ShapeName})");
                 return;
+            }
 
             // 灵敏度门槛：规范图形与原手绘墨迹相似度达标才替换（滑块百分比即门槛，越大越严格）
-            if (ComputeSimilarity(match, replacement) < SimilarityThreshold)
+            double similarity = ComputeSimilarity(match, replacement);
+            if (similarity < SimilarityThreshold)
+            {
+                ConsoleLog.Write("抬笔墨迹纠正", $"相似度不足: {similarity:F2} < {SimilarityThreshold:F2} ({match.ShapeName})");
                 return;
+            }
 
             // 识别期间用户可能已擦除/撤销：任一相关笔画已不在画布则放弃本轮
             if (!target.Contains(stroke))
@@ -276,14 +307,17 @@ public sealed class InkToShapeEngine
                     return;
             }
 
+            ConsoleLog.Write("抬笔墨迹纠正",
+                $"替换: {match.ShapeName}, 相似度={similarity:F2}, 移除={match.Strokes.Count}, 新增={replacement.Count}");
             _apply(target, match.Strokes, replacement);
 
             _recent.Clear();
             Prune(target);
         }
-        catch
+        catch (Exception ex)
         {
             // 墨迹纠正属书写增强：任何异常一律放弃本轮，保留手绘笔画
+            ConsoleLog.Write("抬笔墨迹纠正", $"收笔识别异常: {ex}");
         }
         finally
         {
@@ -385,8 +419,13 @@ public sealed class InkToShapeEngine
     /// <summary>圆：直径够大才纠正；与已纠正的圆做同心/内外切吸附（ICA InkToShapeProcess 圆分支）。</summary>
     private StrokeCollection? BuildCircle(InkShapeMatch match, DrawingAttributes attributes, double scale)
     {
-        if (match.Width <= 75 * scale)
+        if (match.Width <= 75 / scale)
+        {
+            ConsoleLog.Write("墨迹纠正", $"圆太小不纠正: 直径={match.Width:F0} ≤ 门槛={(75 / scale):F0}");
             return null;
+        }
+        ConsoleLog.Write("墨迹纠正",
+            $"圆过门: 直径={match.Width:F0}, 门槛={(75 / scale):F0}, scale={scale:F2}");
 
         var centroid = match.Center;
         foreach (var circle in _circles)
@@ -433,8 +472,14 @@ public sealed class InkToShapeEngine
         var points = match.HotPoints;
         if (points.Count < 4)
             return null;
-        if (match.Width <= 75 * scale && !(match.Height > 75 * scale && points.Count == 4))
+        if (match.Width <= 75 / scale && !(match.Height > 75 / scale && points.Count == 4))
+        {
+            ConsoleLog.Write("墨迹纠正",
+                $"椭圆太小不纠正: 宽={match.Width:F0}, 高={match.Height:F0}, 门槛={(75 / scale):F0}");
             return null;
+        }
+        ConsoleLog.Write("墨迹纠正",
+            $"椭圆过门: 宽={match.Width:F0}, 高={match.Height:F0}, 门槛={(75 / scale):F0}, scale={scale:F2}");
 
         double halfMajor = GetDistance(points[0], points[2]) / 2;   // 长半轴
         double halfMinor = GetDistance(points[1], points[3]) / 2;   // 短半轴
@@ -512,8 +557,14 @@ public sealed class InkToShapeEngine
                        Math.Min(Math.Min(points[0].X, points[1].X), points[2].X);
         double spanY = Math.Max(Math.Max(points[0].Y, points[1].Y), points[2].Y) -
                        Math.Min(Math.Min(points[0].Y, points[1].Y), points[2].Y);
-        if (spanX < 100 * scale && spanY < 100 * scale)
+        if (spanX < 100 / scale && spanY < 100 / scale)
+        {
+            ConsoleLog.Write("墨迹纠正",
+                $"三角形太小不纠正: 跨度={spanX:F0}×{spanY:F0}, 门槛={(100 / scale):F0}");
             return null;
+        }
+        ConsoleLog.Write("墨迹纠正",
+            $"三角形过门: 跨度={spanX:F0}×{spanY:F0}, 门槛={(100 / scale):F0}, scale={scale:F2}");
 
         var fixedPoints = FixPointsDirection(points[0], points[1]);
         points[0] = fixedPoints[0];
@@ -545,8 +596,14 @@ public sealed class InkToShapeEngine
                        Math.Min(Math.Min(Math.Min(points[0].X, points[1].X), points[2].X), points[3].X);
         double spanY = Math.Max(Math.Max(Math.Max(points[0].Y, points[1].Y), points[2].Y), points[3].Y) -
                        Math.Min(Math.Min(Math.Min(points[0].Y, points[1].Y), points[2].Y), points[3].Y);
-        if (spanX < 100 * scale && spanY < 100 * scale)
+        if (spanX < 100 / scale && spanY < 100 / scale)
+        {
+            ConsoleLog.Write("墨迹纠正",
+                $"四边形太小不纠正: 跨度={spanX:F0}×{spanY:F0}, 门槛={(100 / scale):F0}");
             return null;
+        }
+        ConsoleLog.Write("墨迹纠正",
+            $"四边形过门: 跨度={spanX:F0}×{spanY:F0}, 门槛={(100 / scale):F0}, scale={scale:F2}");
 
         var fixedPoints = FixPointsDirection(points[0], points[1]);
         points[0] = fixedPoints[0];
@@ -583,8 +640,13 @@ public sealed class InkToShapeEngine
         double dx = end.X - start.X;
         double dy = end.Y - start.Y;
         double length = Math.Sqrt(dx * dx + dy * dy);
-        if (length < 100 * scale)
+        if (length < 100 / scale)
+        {
+            ConsoleLog.Write("墨迹纠正", $"直线太短不纠正: 长度={length:F0} ≤ 门槛={(100 / scale):F0}");
             return null;   // 最短长度复检（对齐三角/四边形跨度惯例）
+        }
+        ConsoleLog.Write("墨迹纠正",
+            $"直线过门: 长度={length:F0}, 门槛={(100 / scale):F0}, scale={scale:F2}");
 
         // 插值间距 = max(4px, 长度/128) → 点数约 64~128，正好喂饱 ComputeSimilarity 的 ~128 点轮廓采样
         double spacing = Math.Max(4.0, length / 128.0);

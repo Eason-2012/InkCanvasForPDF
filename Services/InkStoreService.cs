@@ -1,4 +1,5 @@
 using System.Data;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Hashing;
 using System.Windows.Ink;
@@ -43,12 +44,20 @@ public sealed class InkStoreService : IDisposable
         try
         {
             Directory.CreateDirectory(InkDir);
+
+            // 哈希计算：记录校验码与耗时（大文件流式读，耗时可见）
+            var stopwatch = Stopwatch.StartNew();
             string hash = ComputePdfHash(pdfPath);
+            stopwatch.Stop();
+            ConsoleLog.Write("哈希验证",
+                $"哈希计算: {Path.GetFileName(pdfPath)} → {hash} ({stopwatch.ElapsedMilliseconds}ms)");
 
             // 判别：列目录、切文件名末段比对（纯文件系统操作，不打开 db）
             string? found = null;
+            int scanned = 0;
             foreach (var file in Directory.GetFiles(InkDir, "*.db"))
             {
+                scanned++;
                 var name = Path.GetFileNameWithoutExtension(file);
                 int dot = name.LastIndexOf('.');
                 if (dot >= 0 && string.Equals(name[(dot + 1)..], hash, StringComparison.OrdinalIgnoreCase))
@@ -64,6 +73,11 @@ public sealed class InkStoreService : IDisposable
                 found = Path.Combine(InkDir, MakeDbName(pdfPath, hash));
                 DeleteWalShm(found);   // 上次被手删的 db 可能残留 -wal/-shm，先清防误恢复
                 created = true;
+                ConsoleLog.Write("哈希验证", $"未命中，新建墨迹库: {Path.GetFileName(found)} (扫描={scanned}个)");
+            }
+            else
+            {
+                ConsoleLog.Write("哈希验证", $"命中已有墨迹库: {Path.GetFileName(found)} (扫描={scanned}个)");
             }
 
             var store = new InkStoreService(found);
@@ -71,13 +85,17 @@ public sealed class InkStoreService : IDisposable
             {
                 // 库损坏：改名保留现场（.bad）后新建空库，应用不中断
                 App.Log("InkStore.Open", new Exception($"墨迹库打开失败，改名重建：{found}"));
+                ConsoleLog.Write("哈希验证", $"墨迹库损坏，改名重建: {Path.GetFileName(found)}");
                 TryRenameBad(found);
                 DeleteWalShm(found);
                 found = Path.Combine(InkDir, MakeDbName(pdfPath, hash));
                 DeleteWalShm(found);
                 store = new InkStoreService(found);
                 if (!store.TryConnect())
+                {
+                    ConsoleLog.Write("哈希验证", "墨迹库无法打开，放弃（降级为不持久化）");
                     return null;
+                }
                 created = true;
             }
 
@@ -87,6 +105,7 @@ public sealed class InkStoreService : IDisposable
         }
         catch (Exception ex)
         {
+            ConsoleLog.Write("哈希验证", $"异常: {ex}");
             App.Log("InkStore.TryOpen", ex);
             return null;
         }
@@ -271,22 +290,34 @@ public sealed class InkStoreService : IDisposable
         try
         {
             if (!Directory.Exists(InkDir))
+            {
+                ConsoleLog.Write("自动删除墨迹数据", "跳过: 墨迹目录不存在");
                 return;
+            }
+            var stopwatch = Stopwatch.StartNew();
             var cutoff = DateTime.UtcNow - TimeSpan.FromDays(days);
+            int scanned = 0, deleted = 0;
             foreach (var file in Directory.GetFiles(InkDir, "*.db"))
             {
+                scanned++;
                 if (File.GetLastWriteTimeUtc(file) >= cutoff)
                     continue;
                 try
                 {
                     File.Delete(file);
                     DeleteWalShm(file);   // 连带清 -wal/-shm 残留（防同名新建被误恢复）
+                    deleted++;
+                    ConsoleLog.Write("自动删除墨迹数据", $"删除: {Path.GetFileName(file)}");
                 }
                 catch { /* 单文件被占用/无权限：跳过 */ }
             }
+            stopwatch.Stop();
+            ConsoleLog.Write("自动删除墨迹数据",
+                $"清理完成: 保留={days}天, 扫描={scanned}, 删除={deleted}, 耗时={stopwatch.ElapsedMilliseconds}ms");
         }
         catch (Exception ex)
         {
+            ConsoleLog.Write("自动删除墨迹数据", $"清理异常: {ex}");
             App.Log("InkStore.CleanExpired", ex);
         }
     }

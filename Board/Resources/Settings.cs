@@ -56,19 +56,9 @@ namespace InkCanvasForPDF.Board
         [JsonProperty("highlighterWidth")]
         public double HighlighterWidth { get; set; } = 2.5; // 荧光笔记忆粗细（= 滑块值一半 → 默认滑块 5）
 
-        [JsonProperty("hyperbolaAsymptoteOption")]
-        public OptionalOperation HyperbolaAsymptoteOption { get; set; } = OptionalOperation.Ask;
-
         // ────── 形状面板固定状态（true=固定：仅图形/批注按钮可关面板；false=自动隐藏：点形状或点外部即关）──────
         [JsonProperty("isShapePanelPinned")]
         public bool IsShapePanelPinned { get; set; } = false;
-    }
-
-    public enum OptionalOperation
-    {
-        Yes,
-        No,
-        Ask
     }
 
     public class Gesture

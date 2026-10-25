@@ -309,6 +309,10 @@ public partial class MainWindow : Window
             {
                 SlideOverlay(SettingsView, _viewModel.IsSettingsVisible);   // 设置页从右滑入/向左滑出（与画板同款）
             }
+            else if (e.PropertyName == nameof(MainViewModel.IsOpeningPdf))
+            {
+                ApplyOpeningBackdrop();   // 加载页全透明：切换下方内容显隐以呈现纯云母
+            }
         };
         _viewModel.InkTool.DisplayScale = _viewModel.DisplayScale;   // 初始同步
         _inkToShape.DisplayScale = _viewModel.DisplayScale;          // 墨迹纠正初始同步
@@ -344,6 +348,9 @@ public partial class MainWindow : Window
                 {
                     foreach (var pageCanvas in _pageInkCanvases)
                         pageCanvas.IsManipulationEnabled = false;
+                    // 页面外层的 ScrollViewer 也在做触摸 Manipulation：单指触摸会被它捕获，
+                    // InkCanvas 内建套索拿不到输入（画板没有这层父级，所以画板正常）→ 选择期间一并关闭
+                    PagesScrollViewer.IsManipulationEnabled = false;
                     SyncPageEditingModes();   // 进入选择也确定性同步（不依赖绑定时序）
                 }
                 else
@@ -351,6 +358,7 @@ public partial class MainWindow : Window
                     ClearPdfSelection();
                     foreach (var pageCanvas in _pageInkCanvases)
                         pageCanvas.IsManipulationEnabled = true;
+                    PagesScrollViewer.IsManipulationEnabled = true;
                     SyncPageEditingModes();   // 退出选择确定性离开 Select（不依赖绑定时序）
                 }
             }
@@ -427,9 +435,50 @@ public partial class MainWindow : Window
             _updateStartupDone = true;
             RunUpdateStartup();
         };
+        // 启动自动清理超期墨迹数据（仅一次）：窗口出现后转后台线程执行，不阻塞启动
+        Loaded += (_, _) =>
+        {
+            if (_cleanStartupDone)
+                return;
+            _cleanStartupDone = true;
+            StartAutoCleanInkBackground();
+        };
+    }
+
+    private bool _cleanStartupDone;   // 启动清理只跑一次（Loaded 可能因可见性变化再次触发）
+
+    /// <summary>启动自动清理超期墨迹数据（"数据存储"设置，开关关则跳过）：
+    /// 窗口出现后在后台线程执行，不阻塞启动；明细日志由 CleanExpired 内部
+    /// [自动删除墨迹数据] 输出，此处异常记 error.log。</summary>
+    private void StartAutoCleanInkBackground()
+    {
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var s = SettingsService.Load();
+                if (s.IsAutoCleanInk)
+                    InkStoreService.CleanExpired(s.AutoCleanInkDays);
+            }
+            catch (Exception ex)
+            {
+                App.Log("Startup.CleanInk", ex);
+            }
+        });
     }
 
     private bool _updateStartupDone;   // 更新启动流程只跑一次（Loaded 可能因可见性变化再次触发）
+
+    /// <summary>加载页全透明呈现纯云母：打开 PDF 期间把下方内容（阅读区/缩略图/欢迎页、墨迹栏、
+    /// 选择工具栏）Opacity 置 0——用 Opacity 不动布局，避免 SizeChanged 重排与空白帧问题；
+    /// 顶栏由 IsToolbarVisible（已加 !IsOpeningPdf）负责。恢复时原样显示。</summary>
+    private void ApplyOpeningBackdrop()
+    {
+        double o = _viewModel.IsOpeningPdf ? 0 : 1;
+        ContentAreaGrid.Opacity = o;
+        InkBar.Opacity = o;
+        BorderStrokeSelectionControl.Opacity = o;
+    }
 
     /// <summary>启动更新流程：清理已装完的下载标记 → 初始化状态机 → 开启自动检查时后台检查并下载
     /// （失败静默记日志，仅手动检查弹通知）→ 更新完成后首次启动弹更新日志。</summary>
@@ -438,39 +487,42 @@ public partial class MainWindow : Window
         var s = _viewModel.Settings;
         UpdateService.CleanupInstalledMarker(s);
         UpdateService.Initialize(s);
+        ConsoleLog.Write("应用更新", $"启动流程: 自动检查={s.IsAutoCheckUpdate}, 初始状态={UpdateService.State}");
         if (s.IsAutoCheckUpdate)
             _ = UpdateService.RunCheckAndDownloadAsync(s, manual: false, ShowFloatingTip);
         _ = ShowChangelogAfterUpdateAsync(s);
     }
 
     /// <summary>更新完成后首次启动：当前版本与已展示日志版本不同且存在对应 Release 时，
-    /// 拉取正文用 iuwm ContentDialog 展示并记为已展示；无匹配 Release（Dev 版）/网络失败静默记日志。</summary>
+    /// 拉取正文（Markdown）用 iuwm ContentDialog + MdXaml 展示并记为已展示；
+    /// 无匹配 Release（Dev 版）/网络失败静默记日志。</summary>
     private async Task ShowChangelogAfterUpdateAsync(Models.AppSettings s)
     {
         var current = UpdateService.CurrentVersion;
+        ConsoleLog.Write("应用更新", $"更新日志: 当前={current}, 已展示={s.ShownChangelogVersion}");
         if (s.ShownChangelogVersion == current)
             return;
         try
         {
             var notes = await UpdateService.GetReleaseNotesAsync(s, current);
             if (notes == null)
-                return;   // 当前版本无对应 Release：不弹
-            var body = new System.Windows.Controls.TextBlock
             {
-                Text = string.IsNullOrWhiteSpace(notes) ? "当前版本只有滚木日志😁" : notes.Trim(),
-                TextWrapping = TextWrapping.Wrap,
-                FontSize = 15,
+                ConsoleLog.Write("应用更新", "更新日志: 无对应Release, 不弹");
+                return;   // 当前版本无对应 Release：不弹
+            }
+            ConsoleLog.Write("应用更新", $"更新日志: 弹出, 版本={current}");
+            // MarkdownScrollViewer 自带滚动，直接作为弹窗内容
+            var body = new MdXaml.MarkdownScrollViewer
+            {
+                Markdown = string.IsNullOrWhiteSpace(notes) ? "当前版本只有滚木日志😁" : notes.Trim(),
+                MaxHeight = 420,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             };
-            body.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "ToolbarForegroundBrush");
+            body.SetResourceReference(MdXaml.MarkdownScrollViewer.ForegroundProperty, "ToolbarForegroundBrush");
             var dialog = new iNKORE.UI.WPF.Modern.Controls.ContentDialog
             {
                 Title = $"更新日志（v{current}）",
-                Content = new System.Windows.Controls.ScrollViewer
-                {
-                    Content = body,
-                    MaxHeight = 420,
-                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                },
+                Content = body,
                 CloseButtonText = "关闭",
                 Owner = this,
             };
@@ -1000,9 +1052,29 @@ public partial class MainWindow : Window
             var binding = BindingOperations.GetBindingExpression(canvas, modeProperty);
             if (binding == null)
                 continue;
+            int strokesBefore = canvas.Strokes.Count;
             _suppressedEditingBindings[canvas] = binding.ParentBinding;
             BindingOperations.ClearBinding(canvas, modeProperty);
             canvas.EditingMode = InkCanvasEditingMode.None;
+            // 第 1 指落下时 InkCanvas 已开始一笔；切 None 时 WPF 可能把它提交而不是丢弃 →
+            // 手势结束后会残留一小截墨迹。这里把本次输入新增的笔画移除（CodeInput 门：不写撤销历史；
+            // PageStrokes_StrokesChanged 的笔画级订阅/_strokePage 簿记仍随事件正常回收）。
+            if (canvas.Strokes.Count > strokesBefore)
+            {
+                var interrupted = new StrokeCollection();
+                for (int i = strokesBefore; i < canvas.Strokes.Count; i++)
+                    interrupted.Add(canvas.Strokes[i]);
+                var savedCommitType = _currentCommitType;
+                _currentCommitType = CommitReason.CodeInput;
+                try
+                {
+                    canvas.Strokes.Remove(interrupted);
+                }
+                finally
+                {
+                    _currentCommitType = savedCommitType;
+                }
+            }
         }
         FlushEraserBatch();   // 橡皮批处理手势打断时先落账，防累加器滞留
         _inkGestureSuppressed = true;
@@ -1156,15 +1228,16 @@ public partial class MainWindow : Window
 
     // ══════════ 墨迹批注：页面 InkCanvas 跟踪 / 面积擦批处理 / 撤销注册 / 墨迹选项菜单 ══════════
 
-    /// <summary>清空当前显示页的墨迹（橡皮菜单滑动清空调用）：绕开面积擦累加器后整体移除，并登记一条可撤销的擦除历史。</summary>
-    public void ClearCurrentPageInk()
+    /// <summary>清空当前显示页的墨迹（橡皮菜单滑动清空调用）：绕开面积擦累加器后整体移除，并登记一条可撤销的擦除历史。
+    /// 返回是否成功清空（页码非法或本就无墨迹=false，调用方据此决定是否切换模式/关菜单）。</summary>
+    public bool ClearCurrentPageInk()
     {
         if (_viewModel.CurrentPage < 1 || _viewModel.CurrentPage > _viewModel.Pages.Count)
-            return;
+            return false;
         var page = _viewModel.Pages[_viewModel.CurrentPage - 1];
         var removed = new StrokeCollection(page.Strokes);
         if (removed.Count == 0)
-            return;
+            return false;
         // 橡皮激活时 StrokesChanged 会入面积擦累加器（只在页面 MouseUp/TouchUp 提交，Popup 内不会触发）→
         // 用 CodeInput 门早退绕开（笔画订阅簿记在其之前仍会完成），清完手动提交同款擦除历史（可撤销）
         var prev = _currentCommitType;
@@ -1178,6 +1251,7 @@ public partial class MainWindow : Window
             _currentCommitType = prev;
         }
         _viewModel.InkTool.TimeMachine.CommitStrokeEraseHistory(removed, targetStrokes: page.Strokes);
+        return true;
     }
 
 
@@ -1363,12 +1437,10 @@ public partial class MainWindow : Window
                       && _viewModel.InkTool.ActiveTool == InkToolMode.Pen
                       && !_viewModel.InkTool.DrawingAttributes.IsHighlighter
                       && _viewModel.InkTool.ShapeDrawMode == 0;
-        // 关闭笔锋（InkStyle=2）+ 硬笔：等宽交 WPF 渲染层开关 IgnorePressure（不再抬笔归一）；
-        // 荧光笔豁免（不参与笔锋/归一路径），软笔恒 false（真压感照旧）。
-        bool ignore2 = _viewModel.InkTool.InkStyle == 2
-                       && !_viewModel.InkTool.PressureEnabled
-                       && !_viewModel.InkTool.DrawingAttributes.IsHighlighter;
-        _viewModel.InkTool.DrawingAttributes.IgnorePressure = ignore2;   // 放循环前：ApplyCurrentColor 以 Clone 重建，克隆链继承
+        // 等宽：荧光笔无笔锋 → 一律忽略硬件压力；关闭笔锋(2)+硬笔同样走 WPF 渲染层开关（不再抬笔归一）
+        bool ignorePressure = _viewModel.InkTool.DrawingAttributes.IsHighlighter
+                              || (_viewModel.InkTool.InkStyle == 2 && !_viewModel.InkTool.PressureEnabled);
+        _viewModel.InkTool.DrawingAttributes.IgnorePressure = ignorePressure;   // 放循环前：ApplyCurrentColor 以 Clone 重建，克隆链继承
         foreach (var canvas in _pageInkCanvases)
         {
             if (canvas is not PageInkCanvas pageCanvas)
@@ -1378,10 +1450,14 @@ public partial class MainWindow : Window
             pageCanvas.Controller.GrowMs = _viewModel.Settings.TimePenGrowMs;
             pageCanvas.Controller.SetCollectArmed(armed);
             pageCanvas.Controller.SetShieldArmed(shield);
-            // 多指书写：副设备由叠加层自绘（主设备仍走原生管线，保持原生命中湿墨/收笔路径不变）
-            pageCanvas.Controller.MultiDeviceEnabled = _viewModel.InkTool.IsMultiFingerInk;
+            // 多指书写：副设备由叠加层自绘（主设备仍走原生管线，保持原生命中湿墨/收笔路径不变）。
+            // 必须带工具门：橡皮/选择/形状下不能采集副设备，否则会边擦边写。
+            pageCanvas.Controller.MultiDeviceEnabled =
+                _viewModel.InkTool.IsMultiFingerInk
+                && _viewModel.InkTool.ActiveTool == InkToolMode.Pen
+                && _viewModel.InkTool.ShapeDrawMode == 0;
             pageCanvas.Controller.SelfDrawAllDevices = false;
-            pageCanvas.DefaultDrawingAttributes.IgnorePressure = ignore2;   // 各页共享 VM DA 实例，幂等直改（对齐 ApplyEraserShapeForMode 写法）
+            pageCanvas.DefaultDrawingAttributes.IgnorePressure = ignorePressure;   // 各页共享 VM DA 实例，幂等直改（对齐 ApplyEraserShapeForMode 写法）
         }
     }
 
@@ -1397,7 +1473,7 @@ public partial class MainWindow : Window
                 canvas.EraserShape = new EllipseStylusShape(5, 5);
             return;
         }
-        double size = _viewModel.InkTool.EraserSize / Math.Max(1.0, _viewModel.DisplayScale);
+        double size = _viewModel.InkTool.EraserSize / _viewModel.DisplayScale;
         foreach (var canvas in _pageInkCanvases)
             canvas.EraserShape = new RectangleStylusShape(size, InkCircleCursor.EraserBoardHeight(size));
     }
@@ -1665,6 +1741,8 @@ public partial class MainWindow : Window
             Message = message,
             IsOpen = true,
             Margin = new Thickness(0, 0, 0, 8),   // 通知间距
+            HorizontalAlignment = HorizontalAlignment.Center,   // 各条按自身内容独立宽度，且逐条居中
+            MaxWidth = 700,                                     // 通知最宽 700px，超出换行
             RenderTransform = new TranslateTransform(),
         };
         FloatingTipPanel.Children.Insert(0, bar);   // 新通知在旧通知上方
@@ -1744,7 +1822,7 @@ public partial class MainWindow : Window
         if (_viewModel.InkTool.ActiveTool == InkToolMode.Eraser && !_viewModel.InkTool.IsStrokeEraser)
         {
             // 与 UpdateEraserShapes 同款补偿：页面坐标 ÷ DisplayScale，屏幕擦除洞恒为 EraserSize
-            double size = _viewModel.InkTool.EraserSize / Math.Max(1.0, _viewModel.DisplayScale);
+            double size = _viewModel.InkTool.EraserSize / _viewModel.DisplayScale;
             inkCanvas.EraserShape = new RectangleStylusShape(size, InkCircleCursor.EraserBoardHeight(size));
         }
         // 墨迹擦：不重设形状（保持 5×5，画板同款——按下重设会把面积擦大矩形写回，点擦光标白方块复现）
@@ -1782,7 +1860,7 @@ public partial class MainWindow : Window
             palmCanvas.Controller.AbortStroke(e.TouchDevice.Id);
 
         // 手掌擦除尺寸 = 橡皮大小（与橡皮光标/面积擦同源；去掉「触点宽×k×特殊屏补偿」公式）
-        double size = _viewModel.InkTool.EraserSize / Math.Max(1.0, _viewModel.DisplayScale);   // 页面坐标抵消缩放
+        double size = _viewModel.InkTool.EraserSize / _viewModel.DisplayScale;   // 页面坐标抵消缩放
         canvas.EraserShape = new RectangleStylusShape(size, InkCircleCursor.EraserBoardHeight(size));
 
         var modeProperty = InkCanvas.EditingModeProperty;                        // 照 CommitPendingPdfStroke 手法
@@ -2049,8 +2127,12 @@ public partial class MainWindow : Window
         try
         {
             var s = _viewModel.Settings;
-            if (s.IsAutoCheckUpdate && !UpdateService.InstallLaunched
-                && !UpdateService.IsInstallClaimedByOther() && UpdateService.HasPendingInstall(s))
+            bool autoCheck = s.IsAutoCheckUpdate;
+            bool launched = UpdateService.InstallLaunched;
+            bool claimedOther = UpdateService.IsInstallClaimedByOther();
+            bool pending = UpdateService.HasPendingInstall(s);
+            ConsoleLog.Write("应用更新", $"退出安装判定: 自动更新={autoCheck}, 已启动安装={launched}, 他方接管={claimedOther}, 待装={pending}");
+            if (autoCheck && !launched && !claimedOther && pending)
                 UpdateService.StartInstall(UpdateService.GetSetupPath(), restart: false);
         }
         catch (Exception ex)

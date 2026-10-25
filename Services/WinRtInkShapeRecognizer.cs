@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Ink;
 using System.Windows.Input;
@@ -41,8 +42,12 @@ internal static class WinRtInkShapeRecognizer
     internal static async Task<InkShapeMatch?> RecognizeAsync(StrokeCollection strokes, Stroke mustInclude)
     {
         if (strokes.Count == 0)
+        {
+            ConsoleLog.Write("墨迹纠正", "WinRT识别未命中: 无输入笔画");
             return null;
+        }
 
+        var stopwatch = Stopwatch.StartNew();
         try
         {
             var analyzer = new WinRtAnalyzer();
@@ -60,29 +65,47 @@ internal static class WinRtInkShapeRecognizer
             }
 
             if (idToStroke.Count == 0)
+            {
+                ConsoleLog.Write("墨迹纠正", "WinRT识别未命中: 无可映射笔画");
                 return null;
+            }
 
             var analysisResult = await analyzer.AnalyzeAsync().AsTask().ConfigureAwait(true);
             if (analysisResult?.Status != global::Windows.UI.Input.Inking.Analysis.InkAnalysisStatus.Updated)
+            {
+                ConsoleLog.Write("墨迹纠正", $"WinRT识别未命中: 分析状态非Updated ({analysisResult?.Status.ToString() ?? "null"})");
                 return null;
+            }
 
             var drawing = FindDrawing(analyzer.AnalysisRoot, idToStroke, mustInclude);
             if (drawing == null)
+            {
+                ConsoleLog.Write("墨迹纠正", "WinRT识别未命中: 未找到包含最新一笔的图形");
                 return null;
+            }
 
             var shapeName = MapShapeName(drawing.DrawingKind);
             if (shapeName == null)
+            {
+                ConsoleLog.Write("墨迹纠正", $"WinRT识别未命中: 形状名未映射 ({drawing.DrawingKind})");
                 return null;
+            }
 
             var points = CopyPoints(drawing);
             if (!HasValidGeometry(drawing.DrawingKind, points))
+            {
+                ConsoleLog.Write("墨迹纠正", $"WinRT识别未命中: 几何无效 ({shapeName}, 点数={points.Length})");
                 return null;
+            }
 
             // 只替换构成本图形的笔画；最新的那一笔必须在内（否则可能命中画布上更早的无关图形）
             var matched = new StrokeCollection();
             var ids = drawing.GetStrokeIds();
             if (ids == null)
+            {
+                ConsoleLog.Write("墨迹纠正", "WinRT识别未命中: 图形笔画ID列表为空");
                 return null;
+            }
             foreach (var id in ids)
             {
                 if (idToStroke.TryGetValue(id, out var stroke))
@@ -90,10 +113,16 @@ internal static class WinRtInkShapeRecognizer
             }
 
             if (matched.Count == 0 || !matched.Contains(mustInclude))
+            {
+                ConsoleLog.Write("墨迹纠正", $"WinRT识别未命中: 不含最新一笔 (matched={matched.Count})");
                 return null;
+            }
 
             BoundsFromPoints(points, out double width, out double height);
             var center = drawing.Center;
+            stopwatch.Stop();
+            ConsoleLog.Write("墨迹纠正",
+                $"WinRT命中: shape={shapeName}, 笔画={matched.Count}, 耗时={stopwatch.ElapsedMilliseconds}ms");
             return new InkShapeMatch
             {
                 ShapeName = shapeName,
@@ -104,8 +133,9 @@ internal static class WinRtInkShapeRecognizer
                 Strokes = matched
             };
         }
-        catch
+        catch (Exception ex)
         {
+            ConsoleLog.Write("墨迹纠正", $"WinRT识别异常: {ex}");
             return null;   // 识别属书写增强：任何异常直接放弃本轮，保留手绘笔画
         }
     }

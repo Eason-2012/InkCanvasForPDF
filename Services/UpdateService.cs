@@ -107,10 +107,12 @@ public static class UpdateService
         {
             State = UpdateState.UpToDate;
         }
+        ConsoleLog.Write("应用更新", $"初始化状态: 状态={State}, 待装版本={(string.IsNullOrEmpty(s.DownloadedUpdateVersion) ? "无" : s.DownloadedUpdateVersion)}");
     }
 
     private static void SetState(UpdateState state)
     {
+        ConsoleLog.Write("应用更新", $"状态流转: {State} → {state}");
         State = state;
         StateChanged?.Invoke();
     }
@@ -126,6 +128,7 @@ public static class UpdateService
             return;
         if (Version.TryParse(s.DownloadedUpdateVersion, out var v) && v <= LocalVersion)
         {
+            ConsoleLog.Write("应用更新", $"清理已装标记: 版本={v} ≤ 当前={CurrentVersion}");
             s.DownloadedUpdateVersion = "";
             SettingsService.Save(s);
         }
@@ -136,6 +139,7 @@ public static class UpdateService
     {
         if (string.IsNullOrEmpty(s.DownloadedUpdateVersion))
             return;
+        ConsoleLog.Write("应用更新", $"通道变更清包: 版本={s.DownloadedUpdateVersion}");
         s.DownloadedUpdateVersion = "";
         PendingVersion = "";
         if (State == UpdateState.ReadyToInstall)
@@ -206,22 +210,6 @@ public static class UpdateService
         return null;
     }
 
-    /// <summary>取当前通道最新 Release 的正文（供「查看更新日志」按钮，不比较版本号）；通道内无可解析版本返回 null。</summary>
-    public static async Task<string?> GetLatestReleaseNotesAsync(AppSettings s, CancellationToken ct = default)
-    {
-        var releases = await FetchReleasesAsync(s, ct);
-        foreach (var item in releases.OfType<JObject>())
-        {
-            var isPrerelease = item.Value<bool?>("prerelease") ?? false;
-            if (s.UpdateChannel == 0 && isPrerelease)
-                continue;
-            var tag = item.Value<string>("tag_name") ?? "";
-            if (Version.TryParse(tag.TrimStart('v', 'V'), out _))
-                return item.Value<string>("body") ?? "";
-        }
-        return null;
-    }
-
     // ══════════ 下载 ══════════
 
     /// <summary>低优先级后台线程流式下载安装包到 Data\Updates\，按字节回报进度；失败删除半截文件。</summary>
@@ -286,6 +274,7 @@ public static class UpdateService
         _busy = true;
         try
         {
+            ConsoleLog.Write("应用更新", $"检查开始: 手动={manual}, 通道={(s.UpdateChannel == 0 ? "稳定" : "预发布")}, 代理={(string.IsNullOrEmpty(s.UpdateProxy) ? "无" : s.UpdateProxy)}");
             SetState(UpdateState.Checking);
 
             UpdateCheckResult? result;
@@ -310,15 +299,18 @@ public static class UpdateService
 
             if (result == null)
             {
+                ConsoleLog.Write("应用更新", $"检查结果: 已是最新, 当前版本={CurrentVersion}");
                 SetState(UpdateState.UpToDate);
                 return;
             }
 
             PendingVersion = result.Version;
+            ConsoleLog.Write("应用更新", $"检查结果: 发现新版本={result.Version}, 预发布={result.IsPrerelease}");
 
             // 包已在（同版本）：不重复下载，直接进入待安装态。
             if (s.DownloadedUpdateVersion == result.Version && File.Exists(GetSetupPath()))
             {
+                ConsoleLog.Write("应用更新", $"跳过下载: 包已存在, 版本={result.Version}");
                 SetState(UpdateState.ReadyToInstall);
                 return;
             }
@@ -349,6 +341,7 @@ public static class UpdateService
 
             s.DownloadedUpdateVersion = result.Version;
             SettingsService.Save(s);
+            ConsoleLog.Write("应用更新", $"下载完成: 文件={GetSetupPath()}, 大小={Math.Round(new FileInfo(GetSetupPath()).Length / 1048576.0, 1)} MB");
             notify?.Invoke("已下载最新版本更新包，关闭应用以完成更新", InfoBarSeverity.Success);
             SetState(UpdateState.ReadyToInstall);
         }
@@ -360,11 +353,10 @@ public static class UpdateService
         void Fail(string reason, bool show, Action<string, InfoBarSeverity>? notifyCallback)
         {
             ErrorMessage = reason;
+            ConsoleLog.Write("应用更新", $"检查失败: 原因={reason}, 手动={show}");
             SetState(UpdateState.Error);
             if (show)
                 notifyCallback?.Invoke($"更新失败：{reason}", InfoBarSeverity.Error);
-            else
-                App.LogText("AutoUpdate 检查失败：" + reason);
         }
     }
 
@@ -386,6 +378,7 @@ public static class UpdateService
     public static void StartInstall(string setupPath, bool restart)
     {
         InstallLaunched = true;
+        ConsoleLog.Write("应用更新", $"启动安装器: 文件={setupPath}, restart={restart}");
         Process.Start(new ProcessStartInfo
         {
             FileName = setupPath,
@@ -404,8 +397,11 @@ public static class UpdateService
     private static Mutex? _installClaim;
 
     /// <summary>声明本进程接管本次安装（在关闭其他实例之前调用）。</summary>
-    public static void ClaimInstall() =>
+    public static void ClaimInstall()
+    {
+        ConsoleLog.Write("应用更新", "接管安装标记: 已声明");
         _installClaim = new Mutex(true, InstallClaimMutexName, out _);
+    }
 
     /// <summary>是否有「其他」实例已接管安装（本实例接管的返回 false，
     /// 本实例自己的退出兜底仍由 InstallLaunched 判断）。</summary>
@@ -434,12 +430,14 @@ public static class UpdateService
     public static async Task CloseOtherInstancesAsync()
     {
         var self = Environment.ProcessId;
+        int others = 0;
 
         foreach (var p in Process.GetProcessesByName("InkCanvasForPDF"))
         {
             using (p)
             {
                 if (p.Id == self) continue;
+                others++;
                 try { p.CloseMainWindow(); } catch { /* 进程刚好退出 */ }
             }
         }
@@ -449,8 +447,13 @@ public static class UpdateService
         {
             await Task.Delay(250);
             if (!OtherInstanceAlive())
+            {
+                ConsoleLog.Write("应用更新", $"关闭其他实例: 数量={others}, 全部退出=True");
                 return;
+            }
         }
+
+        ConsoleLog.Write("应用更新", $"关闭其他实例: 数量={others}, 全部退出=False, 等待=30秒");
 
         bool OtherInstanceAlive()
         {

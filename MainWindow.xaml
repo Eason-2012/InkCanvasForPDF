@@ -272,8 +272,8 @@
             </Grid>
         </Border>
 
-        <!-- ═══ 内容区：缩略图面板 + 页面 ═══ -->
-        <Grid Grid.Row="1">
+        <!-- 内容区：缩略图面板 + 页面（打开 PDF 期间整体 Opacity=0 隐藏，让加载页呈现纯云母） -->
+        <Grid x:Name="ContentAreaGrid" Grid.Row="1">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
@@ -283,8 +283,8 @@
             <Grid Grid.Column="0" ClipToBounds="True"
                   Visibility="{Binding IsThumbnailPanelVisible, Converter={StaticResource BoolToVisibility}}"
                   IsVisibleChanged="ThumbnailPanel_IsVisibleChanged">
-                <!-- 整个白色容器（背景+边框+列表）作为滑入动画对象；ClipToBounds 裁剪滑出列宽的部分 -->
-                <Grid x:Name="ThumbnailPanelHost" Width="200" Background="{DynamicResource CardBackgroundBrush}" RenderTransformOrigin="0,0.5">
+                <!-- 整个半透明白色容器（背景+边框+列表）作为滑入动画对象；ClipToBounds 裁剪滑出列宽的部分 -->
+                <Grid x:Name="ThumbnailPanelHost" Width="200" Background="{DynamicResource ThumbnailPanelTranslucentBrush}" RenderTransformOrigin="0,0.5">
                     <Border BorderBrush="{DynamicResource ToolbarBorderBrush}" BorderThickness="0,0,1,0">
                         <ListBox x:Name="ThumbnailList"
                                  Margin="8"
@@ -383,7 +383,7 @@
                      PanningMode=None：内置触摸平移不看手指数（单指会抢书写、换指瞬间质心跳变会跳视图），
                      平移/缩放/惯性由 MainWindow.xaml.cs 的 PagesControl_Manipulation* 按手指数门控接管。 -->
                 <ScrollViewer x:Name="PagesScrollViewer"
-                              Background="{DynamicResource AppBackgroundBrush}"
+                              Background="Transparent"
                               HorizontalScrollBarVisibility="Auto"
                               VerticalScrollBarVisibility="Auto"
                               IsManipulationEnabled="True"
@@ -520,9 +520,11 @@
             </Grid>
         </Grid>
 
-        <!-- 加载页：打开 PDF 期间全屏不透明（仅进度环+文字，盖住其它一切）；ZIndex 45 = 低于画板(50)、高于设置(40) -->
+        <!-- 加载页：打开 PDF 期间全透明呈现纯云母（Transparent 背景仍拦截输入；
+             下方内容由 ApplyOpeningBackdrop 置 Opacity=0 隐藏，绝不透出欢迎页/旧 PDF）；
+             ZIndex 45 = 低于画板(50)、高于设置(40) -->
         <Grid Grid.Row="0" Grid.RowSpan="2" Panel.ZIndex="45"
-              Background="{DynamicResource AppBackgroundBrush}"
+              Background="Transparent"
               Visibility="{Binding IsOpeningPdf, Converter={StaticResource BoolToVisibility}}">
             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
                 <ui:ProgressRing IsActive="True" IsIndeterminate="True"

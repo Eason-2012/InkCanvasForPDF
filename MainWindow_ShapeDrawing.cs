@@ -2,10 +2,13 @@
 
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Ink;
 using System.Windows.Input;
+using System.Windows.Threading;
+using InkCanvasForPDF.Services;
 using InkCanvasForPDF.ViewModels;
 using Point = System.Windows.Point;
 
@@ -20,6 +23,7 @@ public partial class MainWindow : Window
 
     private Point shapeIniP = new Point(0, 0);
     private bool shapeIsMouseDown;
+    private bool _shapeFinishing;   // 抬笔完成流程进行中（含同步弹窗泵）：屏蔽绘制帧，防泵内 MouseMove 画幽灵帧删曲线/劫持 special
     private bool shapeIsWaitUntilNextTouchDown;
     private Stroke shapeLastTempStroke = null!;
     private StrokeCollection shapeLastTempStrokeCollection = null!;
@@ -145,86 +149,153 @@ public partial class MainWindow : Window
         }
     }
 
-    // ═══ 抬笔定型（ICA MW_ShapeDrawing.cs:1487-1633 形状部分；PDF 无 circles/渐近线弹窗）═══
+    // ═══ 抬笔定型（ICA MW_ShapeDrawing.cs:1487-1633 形状部分；PDF 渐近线弹窗为 iuwm ContentDialog 同步泵，见 AskKeepAsymptote）═══
+
+    /// <summary>「是否保留渐近线？」询问（iuwm ContentDialog，措辞与设置卡片「保留双曲线渐近线」一致）。
+    /// 同步版：Dispatcher.PushFrame 嵌套泵等弹窗关闭——完成流程保持 ICA/MessageBox 的同步语义，
+    /// 不引入 async 续体（修复「弹窗点击后双曲线本体消失」的关键差异）。
+    /// 返回 true=保留，false=移除；弹窗失败按保留处理。PDF 与画板共用（画板经 Window.GetWindow 调用）。</summary>
+    internal bool AskKeepAsymptote()
+    {
+        try
+        {
+            var dialog = new iNKORE.UI.WPF.Modern.Controls.ContentDialog
+            {
+                Title = "双曲线渐近线",
+                Content = "是否保留渐近线？",
+                PrimaryButtonText = "保留",      // 强调按钮 = 安全侧
+                SecondaryButtonText = "移除",
+                Owner = this,
+            };
+            dialog.SetResourceReference(iNKORE.UI.WPF.Modern.Controls.ContentDialog.PrimaryButtonStyleProperty,
+                iNKORE.UI.WPF.Modern.ThemeKeys.AccentButtonStyleKey);
+            var task = dialog.ShowAsync();
+            if (!task.IsCompleted)
+            {
+                var frame = new DispatcherFrame();
+                task.ContinueWith(_ => frame.Continue = false, TaskScheduler.FromCurrentSynchronizationContext());
+                Dispatcher.PushFrame(frame);   // 模态泵：处理弹窗输入，关闭后返回
+            }
+            if (task.Status != TaskStatus.RanToCompletion)
+                throw task.Exception?.GetBaseException() ?? new InvalidOperationException("ContentDialog 未正常完成");
+            return task.Result == iNKORE.UI.WPF.Modern.Controls.ContentDialogResult.Primary;
+        }
+        catch (Exception ex)
+        {
+            App.Log("Shape.AsymptoteAsk", ex);
+            return true;   // 失败保留渐近线（安全侧）
+        }
+    }
+
+    /// <summary>选中双曲线类形状（24/25）时复位两笔状态机（ICA BtnDrawHyperbola_Click L381/393 语义；
+    /// 画板侧 SelectShape 已有同款）。防止上一次只画了第一笔就中止导致 step 残留 1、
+    /// 下一次第一笔抬笔被误判为完成分支。</summary>
+    internal void ResetHyperbolaStep() => shapeMultiStepShapeCurrentStep = 0;
 
     private void ShapeDrawingMouseUp(InkCanvas canvas)
     {
-        if (ShapeDrawMode != 9 && ShapeDrawMode != 0 && ShapeDrawMode != 24 && ShapeDrawMode != 25)
+        _shapeFinishing = true;
+        shapeIsMouseDown = false;   // 提前复位（原在方法尾）：同步弹窗泵期间任何 MouseMove 立即失效
+        try
         {
-            if (!_viewModel.InkTool.IsShapeLongPressSelected)
+            if (ShapeDrawMode != 9 && ShapeDrawMode != 0 && ShapeDrawMode != 24 && ShapeDrawMode != 25)
             {
-                // 画完一次还原到笔模式（SetActiveTool 内部复位 ShapeDrawMode）
-                _viewModel.InkTool.SetActiveTool(InkToolMode.Pen);
-            }
-        }
-        if (ShapeDrawMode == 9)
-        {
-            if (shapeIsFirstTouchCuboid)
-            {
-                shapeCuboidStrokeCollection ??= new StrokeCollection();
-                shapeIsFirstTouchCuboid = false;
-                Point newIniP = new Point(Math.Min(shapeCuboidFrontRectIniP.X, shapeCuboidFrontRectEndP.X), Math.Min(shapeCuboidFrontRectIniP.Y, shapeCuboidFrontRectEndP.Y));
-                Point newEndP = new Point(Math.Max(shapeCuboidFrontRectIniP.X, shapeCuboidFrontRectEndP.X), Math.Max(shapeCuboidFrontRectIniP.Y, shapeCuboidFrontRectEndP.Y));
-                shapeCuboidFrontRectIniP = newIniP;
-                shapeCuboidFrontRectEndP = newEndP;
-                shapeCuboidStrokeCollection.Add(shapeLastTempStrokeCollection);
-            }
-            else
-            {
-                // 画完还原到笔模式
-                _viewModel.InkTool.SetActiveTool(InkToolMode.Pen);
-
-                if (_currentCommitType == CommitReason.ShapeDrawing)
+                if (!_viewModel.InkTool.IsShapeLongPressSelected)
                 {
-                    // 集合为 null 说明本"第二笔"没有对应的第一笔（上手正方体未走完/状态被中断）：
-                    // 跳过提交，避免对 null 集合 Add 抛 NullReferenceException
-                    if (shapeCuboidStrokeCollection != null)
-                    {
-                        shapeCuboidStrokeCollection.Add(shapeLastTempStrokeCollection);
-                        _viewModel.InkTool.TimeMachine.CommitStrokeUserInputHistory(shapeCuboidStrokeCollection, canvas.Strokes);
-                        shapeCuboidStrokeCollection = null;
-                    }
-                    _currentCommitType = CommitReason.UserInput;   // 提交门无论是否提交都复位
+                    // 画完一次还原到笔模式（SetActiveTool 内部复位 ShapeDrawMode）
+                    _viewModel.InkTool.SetActiveTool(InkToolMode.Pen);
                 }
-                // 关键：复位为"第一笔"状态，下一个正方体从正面矩形重新开始。
-                // 原实现画完不复位（shapeIsFirstTouchCuboid 恒为 false），第二次绘制会直接进本分支并对 null 集合 Add → 崩溃。
-                shapeIsFirstTouchCuboid = true;
             }
+            if (ShapeDrawMode == 9)
+            {
+                if (shapeIsFirstTouchCuboid)
+                {
+                    shapeCuboidStrokeCollection ??= new StrokeCollection();
+                    shapeIsFirstTouchCuboid = false;
+                    Point newIniP = new Point(Math.Min(shapeCuboidFrontRectIniP.X, shapeCuboidFrontRectEndP.X), Math.Min(shapeCuboidFrontRectIniP.Y, shapeCuboidFrontRectEndP.Y));
+                    Point newEndP = new Point(Math.Max(shapeCuboidFrontRectIniP.X, shapeCuboidFrontRectEndP.X), Math.Max(shapeCuboidFrontRectIniP.Y, shapeCuboidFrontRectEndP.Y));
+                    shapeCuboidFrontRectIniP = newIniP;
+                    shapeCuboidFrontRectEndP = newEndP;
+                    shapeCuboidStrokeCollection.Add(shapeLastTempStrokeCollection);
+                }
+                else
+                {
+                    // 画完还原到笔模式
+                    _viewModel.InkTool.SetActiveTool(InkToolMode.Pen);
+
+                    if (_currentCommitType == CommitReason.ShapeDrawing)
+                    {
+                        // 集合为 null 说明本"第二笔"没有对应的第一笔（上手正方体未走完/状态被中断）：
+                        // 跳过提交，避免对 null 集合 Add 抛 NullReferenceException
+                        if (shapeCuboidStrokeCollection != null)
+                        {
+                            shapeCuboidStrokeCollection.Add(shapeLastTempStrokeCollection);
+                            _viewModel.InkTool.TimeMachine.CommitStrokeUserInputHistory(shapeCuboidStrokeCollection, canvas.Strokes);
+                            shapeCuboidStrokeCollection = null;
+                        }
+                        _currentCommitType = CommitReason.UserInput;   // 提交门无论是否提交都复位
+                    }
+                    // 关键：复位为"第一笔"状态，下一个正方体从正面矩形重新开始。
+                    // 原实现画完不复位（shapeIsFirstTouchCuboid 恒为 false），第二次绘制会直接进本分支并对 null 集合 Add → 崩溃。
+                    shapeIsFirstTouchCuboid = true;
+                }
+            }
+            if (ShapeDrawMode == 24 || ShapeDrawMode == 25)
+            {
+                if (shapeMultiStepShapeCurrentStep == 0)
+                {
+                    shapeMultiStepShapeCurrentStep = 1;
+                }
+                else
+                {
+                    shapeMultiStepShapeCurrentStep = 0;
+                    var curve = shapeLastTempStrokeCollection;   // 第二笔曲线集合快照（入口处仍在）
+                    ConsoleLog.Write("双曲线绘制", $"完成: 曲线笔画={curve?.Count ?? 0}, 渐近线笔画={shapeMultiStepShapeSpecialStrokeCollection?.Count ?? -1}, 画布笔画={canvas.Strokes.Count}");
+                    // 通用设置（hyperbolaAsymptoteOption）：0=保留 / 1=移除 / 2=询问（iuwm ContentDialog 同步泵）
+                    bool keep = true;
+                    switch (_viewModel.Settings.HyperbolaAsymptoteOption)
+                    {
+                        case 1: keep = false; break;
+                        case 2: keep = AskKeepAsymptote(); break;
+                    }
+                    if (!keep)
+                        canvas.Strokes.Remove(shapeMultiStepShapeSpecialStrokeCollection);
+                    // 自愈：保留/移除决定后曲线若已不在画布（根因未明的移除路径），提交历史前补回
+                    bool healed = false;
+                    if (curve is { Count: > 0 } && !canvas.Strokes.Contains(curve[0]))
+                    {
+                        canvas.Strokes.Add(curve);
+                        healed = true;
+                    }
+                    ConsoleLog.Write("双曲线绘制", $"结果: 渐近线={(keep ? "保留" : "移除")}, 自愈={healed}, 画布笔画={canvas.Strokes.Count}");
+                    // 画完还原到笔模式
+                    _viewModel.InkTool.SetActiveTool(InkToolMode.Pen);
+                }
+            }
+            if (_currentCommitType == CommitReason.ShapeDrawing && ShapeDrawMode != 9)
+            {
+                _currentCommitType = CommitReason.UserInput;
+                StrokeCollection? collection = null;
+                if (shapeLastTempStrokeCollection != null && shapeLastTempStrokeCollection.Count > 0)
+                {
+                    collection = shapeLastTempStrokeCollection;
+                }
+                else if (shapeLastTempStroke != null)
+                {
+                    collection = new StrokeCollection() { shapeLastTempStroke };
+                }
+                if (collection != null)
+                {
+                    _viewModel.InkTool.TimeMachine.CommitStrokeUserInputHistory(collection, canvas.Strokes);
+                }
+            }
+            shapeLastTempStroke = null;
+            shapeLastTempStrokeCollection = null;
         }
-        if (ShapeDrawMode == 24 || ShapeDrawMode == 25)
+        finally
         {
-            if (shapeMultiStepShapeCurrentStep == 0)
-            {
-                shapeMultiStepShapeCurrentStep = 1;
-            }
-            else
-            {
-                shapeMultiStepShapeCurrentStep = 0;
-                // PDF 侧设置体系无 HyperbolaAsymptoteOption：渐近线恒保留（ICA OptionalOperation.Yes 语义）
-                // 画完还原到笔模式
-                _viewModel.InkTool.SetActiveTool(InkToolMode.Pen);
-            }
+            _shapeFinishing = false;
         }
-        shapeIsMouseDown = false;
-        if (_currentCommitType == CommitReason.ShapeDrawing && ShapeDrawMode != 9)
-        {
-            _currentCommitType = CommitReason.UserInput;
-            StrokeCollection? collection = null;
-            if (shapeLastTempStrokeCollection != null && shapeLastTempStrokeCollection.Count > 0)
-            {
-                collection = shapeLastTempStrokeCollection;
-            }
-            else if (shapeLastTempStroke != null)
-            {
-                collection = new StrokeCollection() { shapeLastTempStroke };
-            }
-            if (collection != null)
-            {
-                _viewModel.InkTool.TimeMachine.CommitStrokeUserInputHistory(collection, canvas.Strokes);
-            }
-        }
-        shapeLastTempStroke = null;
-        shapeLastTempStrokeCollection = null;
     }
 
     // ═══ 形状绘制主函数（ICA MW_ShapeDrawing.cs:502-1280 原样移植；inkCanvas→页面画布、
@@ -232,6 +303,7 @@ public partial class MainWindow : Window
 
     private void ShapeMouseTouchMove(InkCanvas canvas, Point endP)
     {
+        if (_shapeFinishing) return;   // 完成流程（含同步弹窗泵）期间屏蔽一切绘制帧
         var drawingShapeMode = ShapeDrawMode;
         // 形状笔画必须关闭墨迹平滑：FitToCurve 会把矩形等少量点的闭合几何拟合成圆角曲线（矩形只剩 5 点）
         var defaultAttributes = _viewModel.InkTool.DrawingAttributes.Clone();
@@ -692,8 +764,9 @@ public partial class MainWindow : Window
                             strokes.Add(stroke.Clone());
                         }
                     }
-                    catch
+                    catch (Exception ex)
                     {
+                        App.Log("Hyperbola.Curve", ex);   // 生成异常只进 error.log（log 只存错误）
                         return;
                     }
                 }

@@ -23,7 +23,7 @@
                            OpenPaneLength="240"
                            SelectionChanged="SettingsNav_SelectionChanged">
             <ui:NavigationView.MenuItems>
-                <!-- 墨迹书写 / 应用主题 / PDF阅读 / 画板书写 导航项（iNKORE Fluent 侧栏） -->
+                <!-- 墨迹书写 / 应用主题 / PDF 阅读 / 画板书写 导航项（iNKORE Fluent 侧栏） -->
                 <ui:NavigationViewItem Content="墨迹书写" Tag="writing">
                     <ui:NavigationViewItem.Icon>
                         <ic:FluentIcon Icon="Signature" IconVariant="Regular" FontSize="20"/>
@@ -34,7 +34,7 @@
                         <ic:FluentIcon Icon="PaintBrush" IconVariant="Regular" FontSize="20"/>
                     </ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
-                <ui:NavigationViewItem Content="PDF阅读" Tag="pdfbar">
+                <ui:NavigationViewItem Content="PDF 阅读" Tag="pdfbar">
                     <ui:NavigationViewItem.Icon>
                         <ic:FluentIcon Icon="DocumentPdf" IconVariant="Regular" FontSize="20"/>
                     </ui:NavigationViewItem.Icon>
@@ -141,6 +141,21 @@
                                 </DockPanel>
                             </ui:SettingsCard>
 
+                            <ui:SettingsCard Header="保留双曲线渐近线"
+                                             Description="请注意，若不保留双曲线渐近线可能会有遇到撤回相关的 BUG 影响使用">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="BezierCurveSquare" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ComboBox x:Name="ComboBoxHyperbolaAsymptoteOption"
+                                          MinWidth="110"
+                                          HorizontalAlignment="Right"
+                                          SelectionChanged="ComboBoxHyperbolaAsymptoteOption_SelectionChanged">
+                                    <ComboBoxItem Content="是"/>
+                                    <ComboBoxItem Content="否"/>
+                                    <ComboBoxItem Content="每次询问"/>
+                                </ComboBox>
+                            </ui:SettingsCard>
+
                         </ikw:SimpleStackPanel>
                     </ScrollViewer>
                 </Grid>
@@ -183,7 +198,7 @@
                     </ScrollViewer>
                 </Grid>
 
-                <!-- ═══ PDF阅读页（原外观页展开组拆分为普通卡）═══ -->
+                <!-- ═══ PDF 阅读页（原外观页展开组拆分为普通卡）═══ -->
                 <Grid x:Name="PdfBarSection" Visibility="Collapsed" Grid.Row="0" Grid.RowSpan="2">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -191,7 +206,7 @@
                     </Grid.RowDefinitions>
                     <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,20,0,20">
                         <ic:FluentIcon Icon="DocumentPdf" IconVariant="Regular" IconSize="Resizable" FontSize="32" VerticalAlignment="Center"/>
-                        <TextBlock Text="PDF阅读" FontSize="24" FontWeight="SemiBold" Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="PDF 阅读" FontSize="24" FontWeight="SemiBold" Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="10,0,0,0" VerticalAlignment="Center"/>
                     </StackPanel>
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                         <ikw:SimpleStackPanel Spacing="4" Margin="0,0,24,24">
@@ -292,6 +307,20 @@
                                 </ui:SettingsExpander.Items>
                             </ui:SettingsExpander>
 
+                            <ui:SettingsCard Header="清空墨迹自动切换模式">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="DeleteLines" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ComboBox x:Name="ComboBoxPdfClearInkSwitchMode"
+                                          MinWidth="130" HorizontalAlignment="Right"
+                                          SelectionChanged="ComboBoxPdfClearInkSwitchMode_SelectionChanged">
+                                    <ComboBoxItem Content="保持在橡皮"/>
+                                    <ComboBoxItem Content="切换到鼠标"/>
+                                    <ComboBoxItem Content="切换到墨迹"/>
+                                    <ComboBoxItem Content="切换到选择"/>
+                                </ComboBox>
+                            </ui:SettingsCard>
+
                             <ui:SettingsCard Header="设置为默认PDF应用">
                                 <ui:SettingsCard.HeaderIcon>
                                     <ic:FluentIcon Icon="DocumentCheckmark" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
@@ -316,6 +345,11 @@
                     </StackPanel>
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                         <ikw:SimpleStackPanel Spacing="4" Margin="0,0,24,24">
+                            <ui:SettingsExpander Header="墨迹栏" IsExpanded="True">
+                                <ui:SettingsExpander.HeaderIcon>
+                                    <ic:FluentIcon Icon="PanelBottom" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsExpander.HeaderIcon>
+                                <ui:SettingsExpander.Items>
                             <ui:SettingsCard Header="缩放大小">
                                 <ui:SettingsCard.HeaderIcon>
                                     <ic:FluentIcon Icon="ZoomIn" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
@@ -366,6 +400,22 @@
                                             Width="220"
                                             ValueChanged="BlackboardOpacitySlider_ValueChanged"/>
                                 </DockPanel>
+                            </ui:SettingsCard>
+                                </ui:SettingsExpander.Items>
+                            </ui:SettingsExpander>
+
+                            <ui:SettingsCard Header="清空墨迹自动切换模式">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="DeleteLines" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ComboBox x:Name="ComboBoxBoardClearInkSwitchMode"
+                                          MinWidth="130" HorizontalAlignment="Right"
+                                          SelectionChanged="ComboBoxBoardClearInkSwitchMode_SelectionChanged">
+                                    <ComboBoxItem Content="保持在橡皮"/>
+                                    <ComboBoxItem Content="切换到鼠标"/>
+                                    <ComboBoxItem Content="切换到墨迹"/>
+                                    <ComboBoxItem Content="切换到选择"/>
+                                </ComboBox>
                             </ui:SettingsCard>
                         </ikw:SimpleStackPanel>
                     </ScrollViewer>
@@ -580,6 +630,31 @@
                                              TextChanged="AutoCleanDaysBox_TextChanged"/>
                                 </DockPanel>
                             </ui:SettingsCard>
+
+                            <!-- ══ 打开目录：墨迹数据（Data\Ink）══ -->
+                            <ui:SettingsCard Header="打开墨迹数据存储目录"
+                                             Description="您可以在目录中对墨迹文件进行导入、导出、删除等操作"
+                                             IsEnabled="True" IsClickEnabled="True" IsActionIconVisible="True"
+                                             Click="OpenInkStorageDir_Click">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="FolderList" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ui:SettingsCard.ActionIcon>
+                                    <ic:FluentIcon Icon="Open" IconVariant="Regular" IconSize="Resizable" FontSize="20"/>
+                                </ui:SettingsCard.ActionIcon>
+                            </ui:SettingsCard>
+
+                            <!-- ══ 打开目录：应用数据（Data）══ -->
+                            <ui:SettingsCard Header="打开应用数据存储目录"
+                                             IsEnabled="True" IsClickEnabled="True" IsActionIconVisible="True"
+                                             Click="OpenAppDataDir_Click">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="FolderOpen" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ui:SettingsCard.ActionIcon>
+                                    <ic:FluentIcon Icon="Open" IconVariant="Regular" IconSize="Resizable" FontSize="20"/>
+                                </ui:SettingsCard.ActionIcon>
+                            </ui:SettingsCard>
                         </ikw:SimpleStackPanel>
                     </ScrollViewer>
                 </Grid>
@@ -704,7 +779,8 @@
                                          TextChanged="UpdateProxyBox_TextChanged"/>
                             </ui:SettingsCard>
 
-                            <ui:SettingsCard Header="查看更新日志"
+                            <ui:SettingsCard x:Name="ViewChangelogCard"
+                                             Header="查看更新日志"
                                              IsEnabled="True" IsClickEnabled="True"
                                              Click="ViewChangelog_Click">
                                 <ui:SettingsCard.HeaderIcon>

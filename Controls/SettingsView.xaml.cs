@@ -46,6 +46,8 @@ public partial class SettingsView : System.Windows.Controls.UserControl
     public SettingsView()
     {
         InitializeComponent();
+        // 「查看更新日志」卡片描述：显示当前版本号（运行时取，不写死 XAML）
+        ViewChangelogCard.Description = $"当前版本：{UpdateService.CurrentVersion}";
         // 更新状态机/进度变化 → 重渲染状态区（本控件与应用同生命周期，构造期订阅一次即可；
         // ApplyUpdateState 带可选参不能直接方法组转换，用 lambda）
         UpdateService.StateChanged += () => ApplyUpdateState();
@@ -98,6 +100,11 @@ public partial class SettingsView : System.Windows.Controls.UserControl
                 // 应用更新：通道/代理回填（自动检查开关走绑定自动同步）+ 状态区首次渲染。
                 UpdateChannelCombo.SelectedIndex = Math.Clamp(vm.Settings.UpdateChannel, 0, 1);
                 UpdateProxyBox.Text = vm.Settings.UpdateProxy;
+                // 保留双曲线渐近线：0=是/1=否/2=每次询问回填下拉框。
+                ComboBoxHyperbolaAsymptoteOption.SelectedIndex = Math.Clamp(vm.Settings.HyperbolaAsymptoteOption, 0, 2);
+                // 清空墨迹自动切换模式：PDF 默认 1（鼠标）、画板默认 2（墨迹），越界值按界回填。
+                ComboBoxPdfClearInkSwitchMode.SelectedIndex = Math.Clamp(vm.Settings.ClearInkAutoSwitchMode, 0, 3);
+                ComboBoxBoardClearInkSwitchMode.SelectedIndex = Math.Clamp(vm.Settings.BoardClearInkAutoSwitchMode, 0, 3);
                 ApplyUpdateState();
             }
         };
@@ -124,16 +131,23 @@ public partial class SettingsView : System.Windows.Controls.UserControl
         SettingsService.Save(vm.Settings);
     }
 
-    /// <summary>"设置为默认PDF应用"：写注册表设 .pdf 默认 + 刷新 Shell，
-    /// 成功走成功样式浮动通知、失败走错误样式（均 3 秒自动消失，不打断操作）。</summary>
+    /// <summary>"设置为默认PDF应用"：写注册表设 .pdf 默认 + 刷新 Shell，成功走成功样式浮动通知；
+    /// 失败走错误态浮动通知（固定文案，异常详情在 Data\error.log）并呼出系统「打开方式」对话框，
+    /// 由用户选本应用一次、系统写入合法 UserChoice（均 3 秒自动消失，不打断操作）。</summary>
     private void SetDefaultPdfApp_Click(object sender, RoutedEventArgs e)
     {
-        if (FileAssociationService.TrySetAsDefaultPdf(out var error))
+        if (FileAssociationService.TrySetAsDefaultPdf(out _))
             ShowFloatingTipFromOwner("已成功设置为默认PDF打开应用",
                 iNKORE.UI.WPF.Modern.Controls.InfoBarSeverity.Success);
         else
-            ShowFloatingTipFromOwner(error ?? "设置默认程序失败，请手动在系统设置中设置",
+        {
+            ShowFloatingTipFromOwner("设置默认应用失败，请手动设置",
                 iNKORE.UI.WPF.Modern.Controls.InfoBarSeverity.Error);
+            // owner=主窗口句柄：对话框必在本窗口之上，阻塞至关闭（SHOpenWithDialog 失败时服务内部回退 rundll32）
+            var owner = Window.GetWindow(this);
+            FileAssociationService.OpenChooseAppDialog(
+                owner is null ? IntPtr.Zero : new System.Windows.Interop.WindowInteropHelper(owner).Handle);
+        }
     }
 
     /// <summary>取宿主 MainWindow 发浮动通知（同 InkToolBar 范式；拿不到宿主时不弹，静默记日志）。</summary>
@@ -368,6 +382,37 @@ public partial class SettingsView : System.Windows.Controls.UserControl
         UpdateTimePenCardVisibility();
         SettingsService.Save(vm.Settings);
         PenStyleChanged?.Invoke(style);
+    }
+
+    /// <summary>保留双曲线渐近线：0=是/1=否/2=每次询问（下标即设置值），写回设置并存盘（PDF 与画板读取时即时生效，无需推送）。</summary>
+    private void ComboBoxHyperbolaAsymptoteOption_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (Vm is not { } vm || ComboBoxHyperbolaAsymptoteOption.SelectedIndex < 0)
+            return;
+        vm.Settings.HyperbolaAsymptoteOption = ComboBoxHyperbolaAsymptoteOption.SelectedIndex;
+        SettingsService.Save(vm.Settings);
+    }
+
+    /// <summary>PDF 侧「清空墨迹自动切换模式」下拉框：写设置并落盘（0=保持在橡皮 1=鼠标 2=墨迹 3=选择）。</summary>
+    private void ComboBoxPdfClearInkSwitchMode_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (Vm is not { } vm || ComboBoxPdfClearInkSwitchMode.SelectedIndex < 0)
+            return;
+        if (vm.Settings.ClearInkAutoSwitchMode == ComboBoxPdfClearInkSwitchMode.SelectedIndex)
+            return;   // 回填同值：不重复存盘
+        vm.Settings.ClearInkAutoSwitchMode = ComboBoxPdfClearInkSwitchMode.SelectedIndex;
+        SettingsService.Save(vm.Settings);
+    }
+
+    /// <summary>画板侧「清空墨迹自动切换模式」下拉框（与 PDF 侧独立，不互通）。</summary>
+    private void ComboBoxBoardClearInkSwitchMode_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (Vm is not { } vm || ComboBoxBoardClearInkSwitchMode.SelectedIndex < 0)
+            return;
+        if (vm.Settings.BoardClearInkAutoSwitchMode == ComboBoxBoardClearInkSwitchMode.SelectedIndex)
+            return;   // 回填同值：不重复存盘
+        vm.Settings.BoardClearInkAutoSwitchMode = ComboBoxBoardClearInkSwitchMode.SelectedIndex;
+        SettingsService.Save(vm.Settings);
     }
 
     /// <summary>时间笔锋长满时间卡片仅当笔锋样式 = 时间笔锋（3）时显示。</summary>
@@ -640,6 +685,28 @@ public partial class SettingsView : System.Windows.Controls.UserControl
         SettingsService.Save(vm.Settings);
     }
 
+    /// <summary>打开墨迹数据存储目录（运行目录 Data\Ink）：不存在先创建，再交资源管理器打开。</summary>
+    private void OpenInkStorageDir_Click(object sender, RoutedEventArgs e)
+        => OpenStorageDirectory(Path.Combine(AppContext.BaseDirectory, "Data", "Ink"));
+
+    /// <summary>打开应用数据存储目录（运行目录 Data，含 Settings.json / error.log / Ink\ 等）。</summary>
+    private void OpenAppDataDir_Click(object sender, RoutedEventArgs e)
+        => OpenStorageDirectory(Path.Combine(AppContext.BaseDirectory, "Data"));
+
+    /// <summary>创建（如缺失）并用资源管理器打开指定目录；失败写 error.log，不影响设置页状态。</summary>
+    private static void OpenStorageDirectory(string dir)
+    {
+        try
+        {
+            Directory.CreateDirectory(dir);
+            Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            App.Log("数据存储", ex);
+        }
+    }
+
     // ═══════════ 应用更新（状态区 + 检查/下载/安装流程 + 更新日志）═══════════
 
     /// <summary>按 UpdateService 状态机 + 设置渲染状态区（图标/标题/副标题/按钮/进度条；状态表见计划）。
@@ -661,7 +728,7 @@ public partial class SettingsView : System.Windows.Controls.UserControl
         FIcon icon;
         string title, subtitle, button;
         bool buttonEnabled = true;
-        bool barVisible = false, barIndeterminate = false, barError = false;
+        bool barVisible = false, barIndeterminate = false, barError = false, barPaused = false;
 
         switch (state)
         {
@@ -696,7 +763,10 @@ public partial class SettingsView : System.Windows.Controls.UserControl
                 title = "已关闭自动更新";
                 subtitle = "您可以点击右侧按钮手动更新";
                 button = "检查更新";
-                break;   // 该态不显示进度条
+                barVisible = true;
+                barIndeterminate = true;   // 不确定进度条 + 暂停态（对齐 Error 态画廊写法）
+                barPaused = true;
+                break;
             case UpdateState.ReadyToInstall:
                 icon = FIcon.ArrowClockwise;
                 title = "已下载最新版本";
@@ -720,6 +790,7 @@ public partial class SettingsView : System.Windows.Controls.UserControl
         UpdateProgressBar.Visibility = barVisible ? Visibility.Visible : Visibility.Collapsed;
         UpdateProgressBar.IsIndeterminate = barIndeterminate;
         UpdateProgressBar.ShowError = barError;
+        UpdateProgressBar.ShowPaused = barPaused;
         if (barVisible && !barIndeterminate)
             UpdateProgressBar.Value = Math.Clamp(UpdateService.DownloadProgress, 0, 100);
     }
@@ -737,7 +808,9 @@ public partial class SettingsView : System.Windows.Controls.UserControl
             try
             {
                 UpdateService.ClaimInstall();                   // ① 接管：其他实例退出时不再自行启动安装器
+                ConsoleLog.Write("应用更新", "立即更新: 已接管安装");
                 await UpdateService.CloseOtherInstancesAsync(); // ② 优雅关闭全部其他实例并等待退出
+                ConsoleLog.Write("应用更新", "立即更新: 实例已退出");
                 UpdateService.StartInstall(UpdateService.GetSetupPath(), restart: true); // ③ 启动安装器
                 Application.Current.Shutdown();                 // ④ 退出本实例
             }
@@ -792,28 +865,24 @@ public partial class SettingsView : System.Windows.Controls.UserControl
         ApplyUpdateState();
     }
 
-    /// <summary>查看更新日志：优先取已下载新版本的 Release 正文，否则取当前通道最新 Release；iuwm ContentDialog 展示。</summary>
+    /// <summary>查看更新日志：取当前版本 Release 正文（Markdown），iuwm ContentDialog 用 MdXaml 渲染展示。</summary>
     private async void ViewChangelog_Click(object sender, RoutedEventArgs e)
     {
         if (Vm is not { } vm)
             return;
 
-        var body = new TextBlock
+        // MarkdownScrollViewer 自带滚动，直接作为弹窗内容
+        var body = new MdXaml.MarkdownScrollViewer
         {
-            Text = "正在获取更新日志…",
-            TextWrapping = TextWrapping.Wrap,
-            FontSize = 15,
+            Markdown = "正在获取更新日志…",
+            MaxHeight = 420,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
         };
-        body.SetResourceReference(TextBlock.ForegroundProperty, "ToolbarForegroundBrush");
+        body.SetResourceReference(MdXaml.MarkdownScrollViewer.ForegroundProperty, "ToolbarForegroundBrush");
         var dialog = new ContentDialog
         {
             Title = "更新日志",
-            Content = new ScrollViewer
-            {
-                Content = body,
-                MaxHeight = 420,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            },
+            Content = body,
             CloseButtonText = "关闭",
             Owner = Window.GetWindow(this) ?? Application.Current.MainWindow,
         };
@@ -824,17 +893,15 @@ public partial class SettingsView : System.Windows.Controls.UserControl
 
         try
         {
-            var notes = UpdateService.HasPendingInstall(vm.Settings)
-                ? await UpdateService.GetReleaseNotesAsync(vm.Settings, vm.Settings.DownloadedUpdateVersion)
-                : await UpdateService.GetLatestReleaseNotesAsync(vm.Settings);
-            body.Text = notes == null || string.IsNullOrWhiteSpace(notes)
+            var notes = await UpdateService.GetReleaseNotesAsync(vm.Settings, UpdateService.CurrentVersion);
+            body.Markdown = notes == null || string.IsNullOrWhiteSpace(notes)
                 ? "当前版本只有滚木日志😁"
                 : notes.Trim();
         }
         catch (Exception ex)
         {
             App.Log("Update.GetReleaseNotes", ex);
-            body.Text = "获取更新日志失败：可能无法连接到 GitHub。";
+            body.Markdown = "获取更新日志失败：可能无法连接到 GitHub。";
         }
     }
 }

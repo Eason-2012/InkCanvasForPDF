@@ -10,9 +10,9 @@
     <RuntimeIdentifiers>win-x64;win-x86;win-arm64</RuntimeIdentifiers>
     <AssemblyName>InkCanvasForPDF</AssemblyName>
     <RootNamespace>InkCanvasForPDF</RootNamespace>
-	<AssemblyVersion>0.20.1</AssemblyVersion>
-	<FileVersion>0.20.1</FileVersion>
-	<InformationalVersion>0.20.1-Dev</InformationalVersion>
+	<AssemblyVersion>0.20.2</AssemblyVersion>
+	<FileVersion>0.20.2</FileVersion>
+	<InformationalVersion>0.20.2-Dev</InformationalVersion>
 	<ApplicationIcon>Resources\app.ico</ApplicationIcon>
 	</PropertyGroup>
   <ItemGroup>
@@ -24,6 +24,7 @@
     <PackageReference Include="Docnet.Core" Version="2.6.0" />
     <PackageReference Include="FluentIcons.Wpf" Version="1.1.312" />
     <PackageReference Include="iNKORE.UI.WPF.Modern" Version="0.10.2" />
+    <PackageReference Include="MdXaml" Version="1.27.0" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="Carrot.UI.ColorPicker" Version="0.2.1" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.13" />

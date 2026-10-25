@@ -169,6 +169,7 @@ public sealed class PauseInkToShapeTracker : IDisposable
             return;   // -1 = 未追踪；-2（鼠标）与 ≥0（Stylus）都是有效追踪状态
 
         var points = _pending.ToArray();
+        ConsoleLog.Write("停顿墨迹纠正", $"停顿触发: 点数={points.Length}, 设备={deviceId}");
         _ = TryPauseAsync(deviceId, points);
     }
 
@@ -177,12 +178,14 @@ public sealed class PauseInkToShapeTracker : IDisposable
         try
         {
             bool committed = await _tryPauseRecognizeAsync(deviceId, points).ConfigureAwait(true);
+            ConsoleLog.Write("停顿墨迹纠正", $"停顿试识别结果: committed={committed}");
             if (committed && deviceId == _trackedDeviceId)
                 _pending.Clear();   // 已提交固化：从零重新采集；未命中保留累积，下次停顿以整条笔画重试
         }
-        catch
+        catch (Exception ex)
         {
             // 停顿强制识别属书写增强：任何异常静默放弃，不断笔
+            ConsoleLog.Write("停顿墨迹纠正", $"停顿试识别异常: {ex}");
         }
     }
 

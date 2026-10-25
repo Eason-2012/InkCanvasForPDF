@@ -154,9 +154,59 @@ internal static class FileAssociationService
         return k != null;
     }
 
+    /// <summary>呼出系统「打开方式」对话框（占位 .pdf 仅取扩展名；用户选本应用后由系统写入带合法 hash 的
+    /// UserChoice——第三方直写/删键必被 Deny 拦截，只能走系统入口）。
+    /// 主路径本进程直调 SHOpenWithDialog：owner 保证对话框在主窗口之上、阻塞至关闭、返回 HRESULT 可落日志；
+    /// hr≠0 回退 rundll32 OpenAs_RunDLL。Win10 起系统忽略注册类标志，"始终使用"是否提供由系统选择器决定。</summary>
+    public static void OpenChooseAppDialog(IntPtr ownerHwnd)
+    {
+        try
+        {
+            string path = Path.Combine(Path.GetTempPath(), "InkCanvasForPDF-associate.pdf");
+            if (!File.Exists(path))
+                File.WriteAllText(path, "%PDF-1.4\n%%EOF\n");
+
+            var info = new OpenAsInfo
+            {
+                File = path,
+                Class = null,                 // null = 用 File 的扩展名
+                Flags = 0x00000001,           // OAIF_ALLOW_REGISTRATION：启用"始终使用"复选框（Win10 起被系统忽略，传之无害）；不传 OAIF_EXEC 避免打开占位文件
+            };
+            int hr = SHOpenWithDialog(ownerHwnd, ref info);   // 阻塞至对话框关闭（UI 线程嵌套消息循环，浮动通知计时器照常）
+            if (hr == 0)
+                return;
+            App.LogText($"FileAssociationService.OpenChooseAppDialog SHOpenWithDialog hr=0x{hr:X8}");
+
+            // 兜底：rundll32 标准启动方式（勿加 CreateNoWindow/UseShellExecute=false——子进程窗口可能被置隐藏/非前台）
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "rundll32.exe",
+                Arguments = $"shell32.dll,OpenAs_RunDLL \"{path}\"",
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            App.Log("FileAssociationService.OpenChooseAppDialog", ex);
+        }
+    }
+
+    /// <summary>OPENASINFO（shlobj_core.h）：pcszFile + pcszClass + oaifInFlags，字段顺序即内存布局。</summary>
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct OpenAsInfo
+    {
+        [MarshalAs(UnmanagedType.LPWStr)] public string? File;
+        [MarshalAs(UnmanagedType.LPWStr)] public string? Class;
+        public uint Flags;
+    }
+
     /// <summary>通知 Shell 关联已变更（刷新文件图标/打开方式缓存）。</summary>
     [System.Runtime.InteropServices.DllImport("shell32.dll")]
     private static extern void SHChangeNotify(int wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
+
+    /// <summary>显示系统「打开方式」对话框（shlobj_core.h，Vista+；阻塞至关闭，返回 HRESULT）。</summary>
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern int SHOpenWithDialog(IntPtr hwndParent, ref OpenAsInfo poainfo);
 
     /// <summary>Win32 直删子键（0 位句柄 = HKEY_CURRENT_USER，需子键 DELETE 权限）。</summary>
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
