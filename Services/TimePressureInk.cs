@@ -918,7 +918,7 @@ public sealed class TimePressureController
     {
         // 直接现读画布 DA：画板（Board）就地修改同一 DA 实例（颜色/粗细），按实例引用缓存会拿到旧值
         double pageWidth = Math.Max(0.01, _canvas.DefaultDrawingAttributes.Width);
-        double tipPageWidth = TipWidthPx / Math.Max(1.0, DisplayScale);
+        double tipPageWidth = TipWidthPx / DisplayScale;
         return 0.5 * tipPageWidth / pageWidth;
     }
 

@@ -153,7 +153,7 @@ public sealed class InkToolViewModel : ViewModelBase
     private double _displayScale = 1.0;
 
     /// <summary>页面显示缩放（整层 ScaleTransform 缩放）。墨迹画布随整层缩放，故"粗细"设 1 即为屏幕 1，
-    /// 须把画笔宽度除以缩放抵消放大，保证屏幕恒定（设 1 → 恰好 1）。</summary>
+    /// 须把画笔宽度除以缩放抵消放大（含 <100% 缩放），保证屏幕恒定（设 1 → 恰好 1）。</summary>
     public double DisplayScale
     {
         get => _displayScale;
@@ -369,12 +369,12 @@ public sealed class InkToolViewModel : ViewModelBase
     }
 
     /// <summary>按当前颜色索引重建 DrawingAttributes（画笔=实色+粗细；荧光笔=半透明+加粗+IsHighlighter）。
-    /// 宽度除以页面缩放 DisplayScale 抵消整层 ScaleTransform 的放大（放大时屏幕恒定）；
-    /// 地板 1.0 → 只除不乘，缩小时不会反向放大（避免"设 1 变 4"的 ×4）。
+    /// 宽度除以页面缩放 DisplayScale 抵消整层 ScaleTransform 的放大——任何缩放（含 <100%）都屏幕恒定
+    /// （缩小时 DA 页面值放大、整层缩放同步缩小，屏幕值不变，故不加 1.0 地板）；
     /// 粗细应用时 ÷2 对齐画板 ICA 约定（画板存储值 = 滑块显示值的一半），保证两侧同滑块值粗细一致。</summary>
     private void ApplyCurrentColor()
     {
-        double scale = Math.Max(1.0, DisplayScale);
+        double scale = DisplayScale;
         var da = DrawingAttributes.Clone();
         da.FitToCurve = FitToCurve;
         if (InkColor > 100)

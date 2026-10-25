@@ -208,14 +208,14 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
 
     private double _zoomLevel = 1.0;
 
-    /// <summary>页面缩放级别（0.25x ~ 4x）。缩放过程中仅由 ScaleTransform 即时缩放（禁止清晰渲染），
+    /// <summary>页面缩放级别（0.15x ~ 5x）。缩放过程中仅由 ScaleTransform 即时缩放（禁止清晰渲染），
     /// 停止 50ms 后清晰当前页一次，1s 无操作后释放 hi 内存。</summary>
     public double ZoomLevel
     {
         get => _zoomLevel;
         set
         {
-            if (SetField(ref _zoomLevel, Math.Clamp(value, 0.25, 4.0)))
+            if (SetField(ref _zoomLevel, Math.Clamp(value, 0.15, 5.0)))
             {
                 OnPropertyChanged(nameof(DisplayScale));
                 ScheduleSharpen();
@@ -358,7 +358,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         {
             if (!SetField(ref _viewportWidth, value) || !HasPdf)
                 return;
-            double newFit = Math.Clamp((_viewportWidth - 40.0) / Math.Max(1, _targetPageWidth), 0.25, 4.0);
+            double newFit = Math.Clamp((_viewportWidth - 40.0) / Math.Max(1, _targetPageWidth), 0.15, 5.0);
             if (Math.Abs(newFit - _widthFit) < 1e-6)
                 return;
             double ratio = newFit / _widthFit;
@@ -761,10 +761,10 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         return dominant;
     }
 
-    /// <summary>按固定倍率缩放（自动夹在 0.25x~4x）。返回是否发生实际变化（clamp 边界时为 false）。</summary>
+    /// <summary>按固定倍率缩放（自动夹在 0.15x~5x）。返回是否发生实际变化（clamp 边界时为 false）。</summary>
     public bool ZoomBy(double factor)
     {
-        double next = Math.Clamp(_zoomLevel * factor, 0.25, 4.0);
+        double next = Math.Clamp(_zoomLevel * factor, 0.15, 5.0);
         if (Math.Abs(next - _zoomLevel) < 1e-9)
             return false;
         ZoomLevel = next;
