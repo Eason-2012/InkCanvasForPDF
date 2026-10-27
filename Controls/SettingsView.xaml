@@ -141,6 +141,16 @@
                                 </DockPanel>
                             </ui:SettingsCard>
 
+                            <ui:SettingsCard Header="荧光笔启用压力感应" Description="开启后，笔画粗细将跟随压力大小动态变化">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="CircleHighlight" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ui:ToggleSwitch x:Name="HighlighterPressureToggle"
+                                                 IsOn="{Binding Settings.HighlighterPressureEnabled, Mode=TwoWay}"
+                                                 OffContent="关" OnContent="开"
+                                                 Toggled="HighlighterPressureToggle_Toggled"/>
+                            </ui:SettingsCard>
+
                             <ui:SettingsCard Header="保留双曲线渐近线"
                                              Description="请注意，若不保留双曲线渐近线可能会有遇到撤回相关的 BUG 影响使用">
                                 <ui:SettingsCard.HeaderIcon>

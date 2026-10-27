@@ -28,6 +28,9 @@ public partial class SettingsView : System.Windows.Controls.UserControl
     /// <summary>「时间笔锋墨迹点长满时间」修改时触发（由 MainWindow 同步所有页面时间笔锋控制器）。</summary>
     public event Action<int>? TimePenGrowMsChanged;
 
+    /// <summary>「荧光笔启用压力感应」切换时触发（由 MainWindow 同步 PDF 页面控制器与画板）。</summary>
+    public event Action<bool>? HighlighterPressureChanged;
+
     /// <summary>「选择笔锋样式」变更时触发（由 MainWindow 同步画板侧 InkStyle 并落盘）。</summary>
     public event Action<int>? PenStyleChanged;
 
@@ -368,6 +371,14 @@ public partial class SettingsView : System.Windows.Controls.UserControl
             return;
         vm.InkTool.FitToCurve = vm.Settings.IsFitToCurve;
         InkSmoothChanged?.Invoke(vm.Settings.IsFitToCurve);   // 同步黑板即时生效
+        SettingsService.Save(vm.Settings);
+    }
+
+    private void HighlighterPressureToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (Vm is not { } vm)
+            return;
+        HighlighterPressureChanged?.Invoke(vm.Settings.HighlighterPressureEnabled);   // 同步 PDF 与画板即时生效
         SettingsService.Save(vm.Settings);
     }
 

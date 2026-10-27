@@ -239,12 +239,7 @@ namespace InkCanvasForPDF.Board
             ColorSwitchCheck();    // 内含 EditingMode=Ink + CheckColorTheme + HideSubPanels("color")
             HideSubPanels("pen", true);
 
-            // ICA ImageBlackboard_Click 进入分支：自动关闭多指书写、开启双指移动
-            if (Settings.Gesture.AutoSwitchTwoFingerGesture)
-            {
-                ToggleSwitchEnableTwoFingerTranslate.IsOn = true;
-                if (isInMultiTouchMode) ToggleSwitchEnableMultiTouchMode.IsOn = false;
-            }
+            // 手势设置全部由用户记忆：进入画板不再自动开关多指书写/双指平移等任何选项。
 
             CheckColorTheme(true);   // ICA 进入画板末尾调用：定黑板底色 + 亮系色板
             SyncBoardInkControls();  // 回填墨迹菜单滑块/下拉框（按恢复的类型记忆值）
@@ -388,12 +383,21 @@ namespace InkCanvasForPDF.Board
         }
 
         /// <summary>时间笔锋墨迹点长满时间（ms）：与 PDF 批注侧共享同一设置，由 MainWindow 注入。</summary>
-        public double TimePenGrowMs { get; set; } = 100.0;
+        public double TimePenGrowMs { get; set; } = 50.0;
 
         /// <summary>注入长满时间并即时同步控制器（MainWindow 在启动与设置变更时调用）。</summary>
         public void ApplyTimePenGrowMs(double ms)
         {
             TimePenGrowMs = ms;
+            RefreshTimePressureArmed();
+        }
+
+        private bool _highlighterPressureEnabled = false;
+
+        /// <summary>荧光笔启用压力感应（主设置 highlighterPressureEnabled；由 MainWindow 注入，作用于荧光笔粗细）。</summary>
+        public void ApplyHighlighterPressureEnabled(bool enabled)
+        {
+            _highlighterPressureEnabled = enabled;
             RefreshTimePressureArmed();
         }
 

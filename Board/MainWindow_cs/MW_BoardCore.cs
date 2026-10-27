@@ -55,6 +55,8 @@ namespace InkCanvasForPDF.Board
         }
         public bool isLongPressSelected = false;                   // ICA MW_ShapeDrawing.cs:37
         private DrawingAttributes drawingAttributes;               // ICA MainWindow.xaml.cs:101
+        /// <summary>多触摸模式固定 EditingMode=None 时的递归守卫（设置会触发 EditingModeChanged）。</summary>
+        private bool _multiTouchModeGuard;
 
         /// <summary>画板工具条底色。必须用控件级查找：Light-Board.xaml 只合并进 BoardView 的
         /// UserControl.Resources，Application 级没有该字典，用 Application.Current.FindResource 必抛
@@ -83,6 +85,14 @@ namespace InkCanvasForPDF.Board
                 inkCanvas.Strokes.Add(stroke);
                 inkCanvas_StrokeCollected(inkCanvas, new InkCanvasStrokeCollectedEventArgs(stroke));
             };
+            // 会话结束（含中断/补收笔）：清掉同设备可能残留的 ICA 预览视觉（挂在 Children 上，不参与命中，
+            // 抬笔丢失时会变成擦不到、选不中的僵尸笔）
+            inkCanvas.Controller.SessionEnded += deviceId =>
+            {
+                if (VisualCanvasList.Remove(deviceId, out var staleCanvas))
+                    inkCanvas.Children.Remove(staleCanvas);
+                StrokeVisualList.Remove(deviceId);
+            };
             RefreshTimePressureArmed();
         }
 
@@ -94,6 +104,7 @@ namespace InkCanvasForPDF.Board
             c.DisplayScale = 1.0;   // 画板墨迹面无整层缩放变换
             c.PressureEnabled = _pressureEnabled;
             c.GrowMs = TimePenGrowMs;
+            c.HighlighterPressureEnabled = _highlighterPressureEnabled;
             // 书写模式 = 画笔工具 + 非形状手绘；橡皮/选择/形状一律视为非书写，时间笔锋整体不介入
             bool penMode = !forceEraser && drawingShapeMode == 0;
             bool inkMode = penMode && (isInMultiTouchMode || inkCanvas.EditingMode == InkCanvasEditingMode.Ink);
@@ -107,13 +118,16 @@ namespace InkCanvasForPDF.Board
                           && inkColor <= 100
                           && inkMode;
             c.SetShieldArmed(shield);
-            // 多触摸模式：全部设备交叠加层绘制（触摸不再走 StrokeVisual 湿墨）；数位笔抬笔仍由原生提交。
-            // 必须带 penMode：橡皮/选择/形状下不能采集，否则边擦边写。
+            // 多触摸模式：全部设备（手指/数位笔/鼠标）交叠加层绘制并在抬笔自提交——画笔模式固定 EditingMode=None，
+            // 原生命中管线已关闭，不存在双份湿墨。必须带 penMode：橡皮/选择/形状下不能采集，否则边擦边写。
             c.SelfDrawAllDevices = isInMultiTouchMode && penMode;
             c.MultiDeviceEnabled = false;
-            // 等宽：荧光笔无笔锋 → 一律忽略硬件压力；关闭笔锋(2)+硬笔同样走 WPF 渲染层开关（不再抬笔归一）
+            // 触摸湿墨改由叠加层绘制（原生触摸湿墨在部分触摸屏上会出"刺"）：只采集触摸设备，
+            // 干墨仍由原生笔画提交（多触摸模式下由自绘管线提交）；笔/鼠标湿墨保持原生。
+            c.CollectTouchDevices = penMode;
+            // 等宽：默认（开关关）荧光笔忽略硬件压力，开关开时荧光笔同权吃压；关闭笔锋(2)+硬笔同样走 WPF 渲染层开关（不再抬笔归一）
             inkCanvas.DefaultDrawingAttributes.IgnorePressure =
-                inkColor > 100 || (Settings.Canvas.InkStyle == 2 && !_pressureEnabled);
+                (inkColor > 100 && !_highlighterPressureEnabled) || (Settings.Canvas.InkStyle == 2 && !_pressureEnabled);
         }
 
         private void loadPenCanvas()
@@ -134,13 +148,30 @@ namespace InkCanvasForPDF.Board
         private void inkCanvas_EditingModeChanged(object sender, RoutedEventArgs e)
         {
             // 停顿强制识别提交在绘笔画时会瞬时切模式：内部切换不触发本处理器的副作用
-            if (_pauseCommitSwitchingMode) return;
+            if (_pauseCommitSwitchingMode || _multiTouchModeGuard) return;
+            // 多触摸画笔模式：固定 None，让时间笔锋叠加层成为唯一收墨管线。
+            // 否则每根手指 TouchDown 切模式都会让 InkCanvas 释放笔捕获 → LostStylusCapture 误杀活会话，
+            // 湿墨丢失后退回等宽 StrokeVisual 预览（"落笔即最终粗细"、"只有一根有笔锋"、偶发丢一根）。
+            ApplyMultiTouchEditingMode();
             // 画笔光标跟随主设置（PenCursorEnabled 由 MainWindow 注入；原读黑板本地 ICA Settings.Canvas.IsShowCursor 导致设置页开关无效）
             ApplyPenCursor();
             ApplyEraserCursor();   // 面积擦显示黑板擦光标，切出擦除时交还内置
             // 不再在进入 Ink 时翻转 forcePointEraser（原 ICA 遗留）：该字段只由 Pivot/VM 驱动，
             // 否则"切墨迹擦→切回笔→再点橡皮"会变成面积擦，与 Pivot/UI 及 PDF 侧不一致
             RefreshTimePressureArmed();   // 编辑模式切换影响时间笔锋武装状态（仅 Ink 模式启用）
+        }
+
+        /// <summary>多触摸画笔模式固定 EditingMode=None：原生命中管线完全关闭，全部设备由时间笔锋叠加层
+        /// 自绘并在抬笔自提交（单一收墨管线）。橡皮/选择/形状工具不在此列，保持内建行为。</summary>
+        private void ApplyMultiTouchEditingMode()
+        {
+            if (!isInMultiTouchMode || forceEraser || drawingShapeMode != 0)
+                return;
+            if (inkCanvas.EditingMode != InkCanvasEditingMode.Ink)
+                return;
+            _multiTouchModeGuard = true;
+            try { inkCanvas.EditingMode = InkCanvasEditingMode.None; }
+            finally { _multiTouchModeGuard = false; }
         }
 
         private void LoadSettings(bool isFirst)
@@ -386,6 +417,28 @@ namespace InkCanvasForPDF.Board
             if (dec.Count == 0)
             {
                 isWaitUntilNextTouchDown = false;
+                // 多触摸画笔模式：手掌擦除等临时切到擦除模式后回到单一收墨管线（None），
+                // 否则下一根手指会一边被叠加层画墨、一边触发内建擦除（边写边擦）。
+                if (isInMultiTouchMode && !forceEraser && drawingShapeMode == 0
+                    && inkCanvas.EditingMode != InkCanvasEditingMode.None
+                    && inkCanvas.EditingMode != InkCanvasEditingMode.Ink
+                    && inkCanvas.EditingMode != InkCanvasEditingMode.Select)
+                {
+                    _multiTouchModeGuard = true;
+                    try { inkCanvas.EditingMode = InkCanvasEditingMode.None; }
+                    finally { _multiTouchModeGuard = false; }
+                    // 守卫吞掉了 EditingModeChanged 的副作用，这里补跑一次光标/武装刷新
+                    inkCanvas_EditingModeChanged(inkCanvas, null);
+                }
+                // 抬笔事件丢失兜底：所有触点已抬起，仍有未收笔会话则按最后一点补收笔（防僵尸笔/丢笔）
+                inkCanvas.Dispatcher.BeginInvoke(
+                    System.Windows.Threading.DispatcherPriority.Background,
+                    new Action(() =>
+                    {
+                        // 期间已开始下一笔（触点重新按下）就不补收笔，避免误杀新会话
+                        if (dec.Count == 0)
+                            inkCanvas.Controller.FinalizeOrphanSessions();
+                    }));
             }
         }
 

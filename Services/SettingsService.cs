@@ -12,11 +12,21 @@ public static class SettingsService
 
     private static readonly JsonSerializerOptions SerOptions = new() { WriteIndented = true };
 
+    /// <summary>本次启动首次 Load 时 Data\Settings.json 是否已存在（false = 全新首次使用）。
+    /// 只在首次 Load 记录，后续 Load 不覆盖（首启运行中 Save 会创建文件、后台 Load 会再次进入）。</summary>
+    public static bool LoadedFromFile { get; private set; }
+    private static bool _loadCaptured;
+
     /// <summary>加载设置；文件不存在或解析失败时返回默认实例。</summary>
     public static AppSettings Load()
     {
         try
         {
+            if (!_loadCaptured)
+            {
+                _loadCaptured = true;
+                LoadedFromFile = File.Exists(SettingsPath);
+            }
             if (!File.Exists(SettingsPath))
                 return new AppSettings();
             var json = File.ReadAllText(SettingsPath);

@@ -103,7 +103,11 @@ public class AppSettings
 
     /// <summary>时间笔锋墨迹点长满时间（ms，10~1000）：数字越大笔锋越明显；仅时间笔锋模式生效。</summary>
     [JsonPropertyName("timePenGrowMs")]
-    public int TimePenGrowMs { get; set; } = 100;
+    public int TimePenGrowMs { get; set; } = 50;
+
+    /// <summary>荧光笔启用压力感应：开启后荧光笔笔画粗细跟随压力大小动态变化（默认关闭 = 等粗）。</summary>
+    [JsonPropertyName("highlighterPressureEnabled")]
+    public bool HighlighterPressureEnabled { get; set; } = false;
 
     /// <summary>批注画笔粗细（1~30）。</summary>
     [JsonPropertyName("inkWidth")]

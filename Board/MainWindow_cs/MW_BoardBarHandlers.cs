@@ -130,6 +130,7 @@ namespace InkCanvasForPDF.Board
             else
             {
                 drawingShapeMode = 0;   // ICA BtnPen_Click:107：切回画笔复位形状模式
+                forceEraser = false;   // 切回画笔：多触摸画笔模式据此固定 EditingMode=None（无此复位会停留在橡皮工具态）
                 inkCanvas.EditingMode = InkCanvasEditingMode.Ink;
 
                 Main_Grid.Background = new SolidColorBrush(StringToColor("#01FFFFFF"));

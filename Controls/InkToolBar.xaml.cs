@@ -836,9 +836,16 @@ public void ApplyFloatBarText(bool show)
         ClearInkLabel.Opacity = 1;
     }
 
-    /// <summary>选择（ICA 屏幕浮动栏 SymbolIconSelect_Click 语义：切入 InkCanvas 内建套索选择模式）。</summary>
+    /// <summary>选择（ICA 屏幕浮动栏 SymbolIconSelect_Click 语义：切入 InkCanvas 内建套索选择模式）；
+    /// 已是选择模式后再次点击 = 全选/取消全选本页墨迹（ICA BtnSelect_Click 语义，对齐画板侧）。</summary>
     private void SelectIcon_Click(object sender, RoutedEventArgs e)
     {
+        if (Vm?.InkTool.ActiveTool == InkToolMode.Select)
+        {
+            if (Window.GetWindow(this) is MainWindow mainWindow)
+                mainWindow.ToggleSelectAllCurrentPageInk();
+            return;
+        }
         Vm?.InkTool.SetActiveTool(InkToolMode.Select);
         UpdateBoardToolState("select");
     }

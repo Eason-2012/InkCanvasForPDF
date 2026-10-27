@@ -27,6 +27,10 @@ namespace InkCanvasForPDF.Board
                     return;
                 }
 
+                // 采样链路加固（只作用于本条笔画）：极端离群点修复 + 稀疏笔画降级平滑
+                StrokeSampleRepair.Apply(e.Stroke);
+                StrokeSmoothingGuard.Apply(e.Stroke);
+
                 // 墨迹纠正（ICA InkToShape 同位置：荧光笔排除之后、压感/笔锋改写之前）：命中则整笔换成规范图形
                 _inkToShape.OnStrokeCollected(e.Stroke, inkCanvas.Strokes);
 

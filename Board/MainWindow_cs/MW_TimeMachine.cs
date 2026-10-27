@@ -231,7 +231,11 @@ namespace InkCanvasForPDF.Board
             }
             if (_currentCommitType == CommitReason.CodeInput || _currentCommitType == CommitReason.ShapeDrawing) return;
             if (currentMode == 1) InkChanged?.Invoke();   // 画板内抬笔/擦除标脏（回放门之后；去抖吸收面积擦中间态，D4）
-            if ((e.Added.Count != 0 || e.Removed.Count != 0) && IsEraseByPoint)
+            // 面积擦恒进批处理；墨迹擦在橡皮工具下也进批处理（逐触摸提交，双指手势成立时可整体回滚），清屏除外
+            bool erasingByTool = IsEraseByPoint
+                || (forceEraser && inkCanvas.EditingMode == InkCanvasEditingMode.EraseByStroke
+                    && _currentCommitType != CommitReason.ClearingCanvas);
+            if ((e.Added.Count != 0 || e.Removed.Count != 0) && erasingByTool)
             {
                 if (AddedStroke == null) AddedStroke = new StrokeCollection();
                 if (ReplacedStroke == null) ReplacedStroke = new StrokeCollection();

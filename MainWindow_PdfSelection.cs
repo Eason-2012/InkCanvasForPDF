@@ -741,6 +741,29 @@ public partial class MainWindow
     private StrokeCollection? ResolveStrokeCollection(Stroke stroke)
         => _trackedStrokePages.Keys.FirstOrDefault(k => k.Contains(stroke));
 
+    /// <summary>已是选择模式后再次点击选择按钮：全选当前显示页全部墨迹（笔画 + 图片，
+    /// ICA BtnSelect_Click 语义，对齐画板侧）；已全选则清除选区。本页之外的页选区一并复位。</summary>
+    public void ToggleSelectAllCurrentPageInk()
+    {
+        if (_viewModel.InkTool.ActiveTool != InkToolMode.Select) return;
+        if (_viewModel.CurrentPage < 1 || _viewModel.CurrentPage > _viewModel.Pages.Count) return;
+        var page = _viewModel.Pages[_viewModel.CurrentPage - 1];
+        var canvas = _pageInkCanvases.FirstOrDefault(c => c.DataContext == page);
+        if (canvas == null) return;                       // 当前页画布未加载：无墨迹可选，no-op
+
+        bool allSelected = canvas.GetSelectedStrokes().Count == canvas.Strokes.Count;   // 画板同款 count 比较（含 0==0）
+        ClearPdfSelection();                              // 本页之外的选区/选择 UI 一并复位；已全选时即“清除”
+        if (allSelected) return;
+
+        StrokeCollection selected = new StrokeCollection();
+        foreach (Stroke stroke in canvas.Strokes)
+        {
+            if (stroke.GetBounds().Width > 0 && stroke.GetBounds().Height > 0)   // 画板同款过滤
+                selected.Add(stroke);
+        }
+        canvas.Select(selected, canvas.Children.OfType<Image>());   // 笔画 + 图片（画板 selectedElements 同款）
+    }
+
     /// <summary>清空所有页面选区并隐藏选择 UI，复位全部选择状态（切出选择工具时调用）。</summary>
     private void ClearPdfSelection()
     {
