@@ -105,7 +105,7 @@ public partial class SettingsView : System.Windows.Controls.UserControl
                 UpdateProxyBox.Text = vm.Settings.UpdateProxy;
                 // 保留双曲线渐近线：0=是/1=否/2=每次询问回填下拉框。
                 ComboBoxHyperbolaAsymptoteOption.SelectedIndex = Math.Clamp(vm.Settings.HyperbolaAsymptoteOption, 0, 2);
-                // 清空墨迹自动切换模式：PDF 默认 1（鼠标）、画板默认 2（墨迹），越界值按界回填。
+                // 清空墨迹自动切换模式：PDF/画板默认 2（墨迹），越界值按界回填。
                 ComboBoxPdfClearInkSwitchMode.SelectedIndex = Math.Clamp(vm.Settings.ClearInkAutoSwitchMode, 0, 3);
                 ComboBoxBoardClearInkSwitchMode.SelectedIndex = Math.Clamp(vm.Settings.BoardClearInkAutoSwitchMode, 0, 3);
                 ApplyUpdateState();

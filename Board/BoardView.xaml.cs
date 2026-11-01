@@ -37,6 +37,9 @@ namespace InkCanvasForPDF.Board
             // 点在菜单面板内或对应按钮上不关（按钮留给各自的 Click 处理器自己 toggle）。
             // 必须显式转 MouseButtonEventHandler：方法组会被推断为 Action<,>，AddHandler 运行时抛"处理程序类型不匹配"。
             AddHandler(UIElement.PreviewMouseDownEvent, (MouseButtonEventHandler)BoardOutsideCloseHandler, true);
+            // 触摸点外关闭：触摸/笔事件被 InkCanvas 处理后会抑制"触摸→鼠标"提升，PreviewMouseDown 收不到，
+            // 故必须另挂 PreviewTouchDown（handledEventsToo 同理接管已被处理的触摸）。
+            AddHandler(UIElement.PreviewTouchDownEvent, (EventHandler<TouchEventArgs>)BoardOutsideTouchCloseHandler, true);
 
             // FlyIn 在 Popup.Opened 后经 Dispatcher（Loaded 优先级）再启动：Popup 首次打开时子树尚未完成
             // 加载/呈现，若在 IsOpen=true 同帧启动 Storyboard，150ms 时钟已走，等首帧呈现动画已过半。
@@ -131,27 +134,41 @@ namespace InkCanvasForPDF.Board
         /// 对应按钮上豁免（按钮留给各自 Click 处理器 toggle，否则按下即关、Click 又开，开关失效），
         /// 其余一律关闭。Popup 内容事件沿逻辑树隧道经过 BoardView，必须保留面板豁免。</summary>
         private void BoardOutsideCloseHandler(object sender, MouseButtonEventArgs e)
+            => CloseBoardMenusOutside(e.OriginalSource as DependencyObject);
+
+        /// <summary>触摸版点外关闭入口：与鼠标版共用同一判定体（触摸被 InkCanvas 处理时不会提升成鼠标事件）。</summary>
+        private void BoardOutsideTouchCloseHandler(object? sender, TouchEventArgs e)
+            => CloseBoardMenusOutside(e.OriginalSource as DependencyObject);
+
+        /// <summary>点外关闭判定体（鼠标/触摸共用）：三个 Popup 面板与图形面板各判豁免后关闭。</summary>
+        private void CloseBoardMenusOutside(DependencyObject? source)
         {
+            if (source == null)
+                return;
             if (BoardPenPalettePopup.IsOpen
-                && e.OriginalSource is DependencyObject d
-                && !IsVisualDescendantOf(d, BoardPenPalette)
-                && !IsVisualDescendantOf(d, BoardPen))
+                && !IsVisualDescendantOf(source, BoardPenPalette)
+                && !IsVisualDescendantOf(source, BoardPen))
             {
                 PopupFlyAnimator.FlyOut(BoardPenPalettePopup, BoardPenPalette);   // 滑出动画幂等，重复点外不叠加
             }
             if (BoardGesturePopup.IsOpen
-                && e.OriginalSource is DependencyObject g
-                && !IsVisualDescendantOf(g, BoardTwoFingerGestureBorder)
-                && !IsVisualDescendantOf(g, BoardGestureBtn))
+                && !IsVisualDescendantOf(source, BoardTwoFingerGestureBorder)
+                && !IsVisualDescendantOf(source, BoardGestureBtn))
             {
                 PopupFlyAnimator.FlyOut(BoardGesturePopup, BoardTwoFingerGestureBorder);
             }
             if (BoardEraserPalette.IsOpen
-                && e.OriginalSource is DependencyObject s
-                && !IsVisualDescendantOf(s, BoardEraserPaletteRoot)
-                && !IsVisualDescendantOf(s, BoardEraser))
+                && !IsVisualDescendantOf(source, BoardEraserPaletteRoot)
+                && !IsVisualDescendantOf(source, BoardEraser))
             {
                 PopupFlyAnimator.FlyOut(BoardEraserPalette, BoardEraserPaletteRoot);   // 滑出动画幂等，重复点外不叠加
+            }
+            // 图形面板（非固定状态）：等价于 XAML 的 Main_Grid_ShapePanelOutsideDown，触摸路径同款
+            if (!_shapePanelPinned && BoardShapePalette.IsOpen
+                && !IsVisualDescendantOf(source, BoardBorderDrawShape)
+                && !IsVisualDescendantOf(source, BoardDrawShape))
+            {
+                CollapseBorderDrawShape();
             }
         }
 
@@ -329,13 +346,16 @@ namespace InkCanvasForPDF.Board
 
         private InkCircleCursor? _eraserCursor;        // 黑板擦光标缓存（尺寸没变则复用）
         private double _eraserCursorWidth = -1;
+        private double _palmEraseWidth;                // 手掌擦除洞宽（屏幕 DIP，0 = 未在手掌擦除；光标与洞等大）
 
         /// <summary>按 EraserDiameter 重建黑板擦光标并按编辑模式应用：面积擦显示自定义黑板擦（38:56，
-        /// 与 PDF 批注侧同款），其余模式交还 WPF 内置（Cursor="Pen"）。橡皮粗细设置变化时由 MainWindow 调用。</summary>
+        /// 与 PDF 批注侧同款），其余模式交还 WPF 内置（Cursor="Pen"）。橡皮粗细设置变化时由 MainWindow 调用。
+        /// 手掌擦除期间宽 = 手掌接触面积算出的洞（与洞严格等大），不按橡皮粗细。</summary>
         public void ApplyEraserCursor()
         {
-            double width = EraserDiameter;
-            if (_eraserCursor == null || Math.Abs(_eraserCursorWidth - width) >= 1.0)
+            double width = _palmEraseWidth > 0 ? _palmEraseWidth : EraserDiameter;
+            // >0.01 才算没变（0.01 挡浮点噪声）：手掌 footprint 逐次浮动，原 1 DIP 阈值会停旧尺寸 → 洞比光标大一圈
+            if (_eraserCursor == null || Math.Abs(_eraserCursorWidth - width) > 0.01)
             {
                 double dpi = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
                 var created = InkCircleCursor.CreateEraserBoard(width, dpi);

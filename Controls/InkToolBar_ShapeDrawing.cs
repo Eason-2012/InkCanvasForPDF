@@ -69,10 +69,18 @@ public partial class InkToolBar
 
     /// <summary>面板外点击关闭（非固定状态生效；宿主 Window PreviewMouseDown 隧道入口，打开时挂接/关闭时摘除）。</summary>
     private void ShapePanelOutsideDown(object sender, MouseButtonEventArgs e)
+        => ShapePanelOutsideClose(e.OriginalSource as DependencyObject);
+
+    /// <summary>触摸版面板外关闭入口：触摸被 InkCanvas 处理时不会提升成鼠标事件，必须单独挂 PreviewTouchDown。</summary>
+    private void ShapePanelOutsideTouchDown(object? sender, TouchEventArgs e)
+        => ShapePanelOutsideClose(e.OriginalSource as DependencyObject);
+
+    /// <summary>面板外关闭判定体（鼠标/触摸共用）：非固定状态、点击源不在面板内也不在入口按钮上才关。</summary>
+    private void ShapePanelOutsideClose(DependencyObject? src)
     {
         if (_shapePanelPinned || !ShapePalette.IsOpen)
             return;
-        if (e.OriginalSource is not DependencyObject src)
+        if (src == null)
             return;
         // 点在面板内或图形入口按钮上交给各自处理器（入口按钮 Click 负责 toggle）
         if (BorderDrawShape.IsAncestorOf(src) || BtnDrawShape.IsAncestorOf(src))
@@ -87,6 +95,8 @@ public partial class InkToolBar
         if (Window.GetWindow(this) is not { } w) return;
         w.AddHandler(UIElement.PreviewMouseDownEvent,
             new MouseButtonEventHandler(ShapePanelOutsideDown), true);
+        w.AddHandler(UIElement.PreviewTouchDownEvent,
+            new EventHandler<TouchEventArgs>(ShapePanelOutsideTouchDown), true);
         _shapeOutsideHooked = true;
     }
 
@@ -95,8 +105,12 @@ public partial class InkToolBar
     {
         if (!_shapeOutsideHooked) return;
         if (Window.GetWindow(this) is { } w)
+        {
             w.RemoveHandler(UIElement.PreviewMouseDownEvent,
                 new MouseButtonEventHandler(ShapePanelOutsideDown));
+            w.RemoveHandler(UIElement.PreviewTouchDownEvent,
+                new EventHandler<TouchEventArgs>(ShapePanelOutsideTouchDown));
+        }
         _shapeOutsideHooked = false;
     }
 
@@ -225,7 +239,10 @@ public partial class InkToolBar
         // 图标颜色直接控制：共享 DrawingImage 内部 DynamicResource 按"定义处上下文"解析，
         // Border.Resources 本地覆盖不会命中（主题级替换才生效）——故改为每图标克隆独占实例直接改画刷。
         EnsureShapeIconClones();
-        var themeColor = ((SolidColorBrush)FindResource("FloatBarForeground")).Color;
+        // 资源查找可能返回非画刷（特定时序下为 NamedObject，曾致 InvalidCastException）→ 模式匹配 + 主题回退
+        var themeColor = FindResource("FloatBarForeground") is SolidColorBrush themeBrush
+            ? themeBrush.Color
+            : (Services.ThemeService.IsDark ? Colors.White : Colors.Black);
         foreach (var (m, drawing) in _shapeIconDrawings!)
         {
             var color = m == mode

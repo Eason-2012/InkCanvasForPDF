@@ -71,11 +71,13 @@ namespace InkCanvasForPDF.Board
                 if (drawingShapeMode == 0 && forceEraser) return;
                 // 手掌不是书写设备：丢弃它可能已建立的时间笔锋会话，防止手掌既擦又写
                 inkCanvas.Controller.AbortStroke(e.TouchDevice.Id);
-                // 尺寸 = 触点接触面积 √(W×H)（判定仍按触点宽度阈值）
+                // 尺寸 = 触点接触面积 ÷3（判定仍按触点宽度阈值）；光标与洞同源
                 double footprint = PalmEraseMetrics.GetTouchFootprintSize(e);
+                _palmEraseWidth = footprint;
                 inkCanvas.EraserShape = new RectangleStylusShape(footprint, InkCircleCursor.EraserBoardHeight(footprint));
                 TouchDownPointsList[e.TouchDevice.Id] = InkCanvasEditingMode.EraseByPoint;
                 inkCanvas.EditingMode = InkCanvasEditingMode.EraseByPoint;
+                ApplyEraserCursor();   // 已处于 EraseByPoint 时 EditingModeChanged 不触发，显式刷新光标
             }
             else
             {
@@ -261,8 +263,10 @@ namespace InkCanvasForPDF.Board
                 else
                 {
                     double footprint = PalmEraseMetrics.GetTouchFootprintSize(e);
+                    _palmEraseWidth = footprint;   // 光标与洞同源
                     inkCanvas.EraserShape = new RectangleStylusShape(footprint, InkCircleCursor.EraserBoardHeight(footprint));
                     inkCanvas.EditingMode = InkCanvasEditingMode.EraseByPoint;   // 手掌擦除 = 仅面积擦
+                    ApplyEraserCursor();
                 }
             }
             else
@@ -285,18 +289,36 @@ namespace InkCanvasForPDF.Board
         System.Windows.Point centerPoint;
         InkCanvasEditingMode lastInkCanvasEditingMode = InkCanvasEditingMode.Ink;
         bool isSingleFingerDragMode = false;
+        bool _eraseGestureBatchGuard;   // 双指手势防擦守卫：橡皮批处理只累积不提交，结束时统一回滚
 
         /// <summary>双指手势成立时回滚橡皮批处理（CodeInput 门，不入撤销历史）：橡皮 + 双指缩放不留擦除痕迹。</summary>
         private void RevertEraseBatchForGesture()
         {
             if (ReplacedStroke == null && AddedStroke == null)
                 return;
+            ConsoleLog.Write("橡皮", $"双指手势回滚: 原笔画={ReplacedStroke?.Count ?? 0}, 片段={AddedStroke?.Count ?? 0}");
             var savedCommitType = _currentCommitType;
             _currentCommitType = CommitReason.CodeInput;
             try
             {
-                if (AddedStroke is { Count: > 0 }) inkCanvas.Strokes.Remove(AddedStroke);
-                if (ReplacedStroke is { Count: > 0 }) inkCanvas.Strokes.Add(ReplacedStroke);
+                // 逐笔成员校验后再动集合：横扫会把上一轮拆出的片段再次擦掉（已不在集合），
+                // 直接 Remove(AddedStroke) 会对死片段抛 ArgumentException（PDF 侧 error.log 实测同款）
+                if (AddedStroke is { Count: > 0 })
+                {
+                    var alive = new StrokeCollection();
+                    foreach (var s in AddedStroke)
+                        if (inkCanvas.Strokes.Contains(s)) alive.Add(s);
+                    if (alive.Count > 0)
+                        inkCanvas.Strokes.Remove(alive);
+                }
+                if (ReplacedStroke is { Count: > 0 })
+                {
+                    var missing = new StrokeCollection();
+                    foreach (var s in ReplacedStroke)
+                        if (!inkCanvas.Strokes.Contains(s)) missing.Add(s);
+                    if (missing.Count > 0)
+                        inkCanvas.Strokes.Add(missing);
+                }
             }
             finally
             {
@@ -325,7 +347,11 @@ namespace InkCanvasForPDF.Board
                     inkCanvas.EditingMode = InkCanvasEditingMode.None;
                 }
                 if (dec.Count >= 2 && forceEraser)
-                    RevertEraseBatchForGesture();   // 橡皮 + 双指手势成立：回滚本触摸已擦内容，不留擦除痕迹
+                {
+                    _eraseGestureBatchGuard = true;
+                    inkCanvas.EraserShape = new EllipseStylusShape(0.01, 0.01);   // 手势期间橡皮物理失效：在途擦除立即失去命中面积
+                    RevertEraseBatchForGesture();                                  // 回滚本触摸已擦内容
+                }
             }
         }
 
@@ -341,6 +367,14 @@ namespace InkCanvasForPDF.Board
             }
             dec.Remove(e.TouchDevice.Id);
             inkCanvas.Opacity = 1;
+            if (dec.Count == 0 && _eraseGestureBatchGuard)
+            {
+                _eraseGestureBatchGuard = false;
+                RevertEraseBatchForGesture();   // 兜底：回滚手势期间漏网的擦除（Preview 先于冒泡 MouseUp，提交时批处理已空）
+                inkCanvas.EraserShape = forcePointEraser
+                    ? new RectangleStylusShape(EraserDiameter, InkCircleCursor.EraserBoardHeight(EraserDiameter))
+                    : new EllipseStylusShape(5, 5);   // 恢复真实橡皮形状（同 Main_Grid_TouchDown 公式）
+            }
         }
         private void inkCanvas_ManipulationStarting(object sender, ManipulationStartingEventArgs e)
         {

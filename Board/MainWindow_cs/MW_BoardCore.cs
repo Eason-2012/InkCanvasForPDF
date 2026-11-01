@@ -121,10 +121,6 @@ namespace InkCanvasForPDF.Board
             // 多触摸模式：全部设备（手指/数位笔/鼠标）交叠加层绘制并在抬笔自提交——画笔模式固定 EditingMode=None，
             // 原生命中管线已关闭，不存在双份湿墨。必须带 penMode：橡皮/选择/形状下不能采集，否则边擦边写。
             c.SelfDrawAllDevices = isInMultiTouchMode && penMode;
-            c.MultiDeviceEnabled = false;
-            // 触摸湿墨改由叠加层绘制（原生触摸湿墨在部分触摸屏上会出"刺"）：只采集触摸设备，
-            // 干墨仍由原生笔画提交（多触摸模式下由自绘管线提交）；笔/鼠标湿墨保持原生。
-            c.CollectTouchDevices = penMode;
             // 等宽：默认（开关关）荧光笔忽略硬件压力，开关开时荧光笔同权吃压；关闭笔锋(2)+硬笔同样走 WPF 渲染层开关（不再抬笔归一）
             inkCanvas.DefaultDrawingAttributes.IgnorePressure =
                 (inkColor > 100 && !_highlighterPressureEnabled) || (Settings.Canvas.InkStyle == 2 && !_pressureEnabled);
@@ -417,6 +413,12 @@ namespace InkCanvasForPDF.Board
             if (dec.Count == 0)
             {
                 isWaitUntilNextTouchDown = false;
+                // 手掌抬起：洞宽归零，光标按当前模式恢复（洞尺寸在下一次落笔时重设）
+                if (_palmEraseWidth > 0)
+                {
+                    _palmEraseWidth = 0;
+                    ApplyEraserCursor();
+                }
                 // 多触摸画笔模式：手掌擦除等临时切到擦除模式后回到单一收墨管线（None），
                 // 否则下一根手指会一边被叠加层画墨、一边触发内建擦除（边写边擦）。
                 if (isInMultiTouchMode && !forceEraser && drawingShapeMode == 0

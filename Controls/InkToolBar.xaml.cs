@@ -343,7 +343,7 @@ public void ApplyFloatBarText(bool show)
         // 选中色按状态分层：
         // ①彩色背景（ICA 最早版本；彩色栏深浅主题观感一致，恒用浅色值）：亮 #88CAED
         // ②开文字注释：强调色 50% 混白（浅）/混黑（深）
-        // ③关文字注释（圆条模式）：浅 #E2E4E8 / 深 #525252
+        // ③关文字注释（圆条模式）：浅 #D8DCE2 / 深 #525252
         bool colorful = Vm?.Settings.IsColorfulViewboxFloatingBar ?? false;
         Color check;
         if (colorful)
@@ -355,7 +355,7 @@ public void ApplyFloatBarText(bool show)
         }
         else
             check = Services.ThemeService.IsDark ? Color.FromRgb(0x52, 0x52, 0x52)
-                                                 : Color.FromRgb(0xD6, 0xDA, 0xE0);
+                                                 : Color.FromRgb(0xD8, 0xDC, 0xE2);
         var pillVisible = !_floatBarTextVisible && !colorful ? Visibility.Visible : Visibility.Collapsed;
         // 选中色画刷：恒为实心，不跟随栏不透明度（栏透明度只作用于背景画刷）；
         // CheckBorder.Opacity=0.99 仅激活态合成约定，视觉≈1。
@@ -519,6 +519,7 @@ public void ApplyFloatBarText(bool show)
 
     /// <summary>宿主窗口外点关闭挂接：PreviewMouseDown + handledEventsToo 覆盖一切点击（含已被处理的）。
     /// 显式转 MouseButtonEventHandler：方法组会被推断为 Action&lt;,&gt;，AddHandler 运行时抛"处理程序类型不匹配"。
+    /// 另挂 PreviewTouchDown：触摸被 InkCanvas 处理后会抑制"触摸→鼠标"提升，只挂鼠标事件时触摸点外不关闭。
     /// 幂等挂接（点外关闭同时管墨迹/橡皮两个菜单，只挂一次）。</summary>
     private bool _outsideCloseHooked;
 
@@ -528,6 +529,7 @@ public void ApplyFloatBarText(bool show)
         if (Window.GetWindow(BtnPen) is { } w)
         {
             w.AddHandler(UIElement.PreviewMouseDownEvent, (MouseButtonEventHandler)OutsideCloseHandler, true);
+            w.AddHandler(UIElement.PreviewTouchDownEvent, (EventHandler<TouchEventArgs>)OutsideCloseTouchHandler, true);
             _outsideCloseHooked = true;
         }
     }
@@ -543,11 +545,22 @@ public void ApplyFloatBarText(bool show)
     {
         if (!_outsideCloseHooked) return;
         if (Window.GetWindow(BtnPen) is { } w)
+        {
             w.RemoveHandler(UIElement.PreviewMouseDownEvent, (MouseButtonEventHandler)OutsideCloseHandler);
+            w.RemoveHandler(UIElement.PreviewTouchDownEvent, (EventHandler<TouchEventArgs>)OutsideCloseTouchHandler);
+        }
         _outsideCloseHooked = false;
     }
 
     private void OutsideCloseHandler(object sender, MouseButtonEventArgs e)
+        => CloseToolbarMenusOutside(e.OriginalSource as DependencyObject);
+
+    /// <summary>触摸版点外关闭入口：与鼠标版共用同一判定体。</summary>
+    private void OutsideCloseTouchHandler(object? sender, TouchEventArgs e)
+        => CloseToolbarMenusOutside(e.OriginalSource as DependencyObject);
+
+    /// <summary>点外关闭判定体（鼠标/触摸共用）。</summary>
+    private void CloseToolbarMenusOutside(DependencyObject? d)
     {
         bool penOpen = PenPalette.IsOpen;
         bool eraserOpen = EraserPalette.IsOpen;
@@ -556,7 +569,7 @@ public void ApplyFloatBarText(bool show)
             UnhookOutsideClose();
             return;
         }
-        if (e.OriginalSource is not DependencyObject d) return;
+        if (d == null) return;
         // 点在墨迹面板内或墨迹按钮上不关（按钮留给 PenIcon_Click 自己 toggle）；橡皮同理
         if (penOpen && !IsDescendantOf(d, PenPaletteRoot) && !IsDescendantOf(d, BtnPen))
         {

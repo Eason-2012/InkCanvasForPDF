@@ -208,14 +208,14 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
 
     private double _zoomLevel = 1.0;
 
-    /// <summary>页面缩放级别（0.15x ~ 5x）。缩放过程中仅由 ScaleTransform 即时缩放（禁止清晰渲染），
+    /// <summary>页面缩放级别（0.05x ~ 5x）。缩放过程中仅由 ScaleTransform 即时缩放（禁止清晰渲染），
     /// 停止 50ms 后清晰当前页一次，1s 无操作后释放 hi 内存。</summary>
     public double ZoomLevel
     {
         get => _zoomLevel;
         set
         {
-            if (SetField(ref _zoomLevel, Math.Clamp(value, 0.15, 5.0)))
+            if (SetField(ref _zoomLevel, Math.Clamp(value, 0.05, 5.0)))
             {
                 OnPropertyChanged(nameof(DisplayScale));
                 ScheduleSharpen();
@@ -456,6 +456,8 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
             if (sizes.viewState.TryGetValue("pdf_zoom", out var zoomStr)
                 && double.TryParse(zoomStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var zoom))
                 ZoomLevel = zoom;
+            else
+                ZoomLevel = 1.0;   // 无墨迹文档：缩放复位，防止继承上一个 PDF 的缩放
             _ = Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
             {
                 if (!HasPdf)
@@ -471,8 +473,8 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
                     int.TryParse(pageStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out page);
                 if (hasOffset && RequestRestoreScroll != null)
                     RequestRestoreScroll(offset, Math.Max(1, page));
-                else if (page > 1)
-                    GoToPage(page);
+                else
+                    GoToPage(Math.Max(1, page));   // 无墨迹文档：滚动复位到页顶，防止继承上一个 PDF 的滚动位置
 
                 // 位置恢复后再等首屏可见页位图就位，才撤加载页（成功路径唯一出口；含超时兜底）
                 stopwatch.Stop();
@@ -761,10 +763,10 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         return dominant;
     }
 
-    /// <summary>按固定倍率缩放（自动夹在 0.15x~5x）。返回是否发生实际变化（clamp 边界时为 false）。</summary>
+    /// <summary>按固定倍率缩放（自动夹在 0.05x~5x）。返回是否发生实际变化（clamp 边界时为 false）。</summary>
     public bool ZoomBy(double factor)
     {
-        double next = Math.Clamp(_zoomLevel * factor, 0.15, 5.0);
+        double next = Math.Clamp(_zoomLevel * factor, 0.05, 5.0);
         if (Math.Abs(next - _zoomLevel) < 1e-9)
             return false;
         ZoomLevel = next;

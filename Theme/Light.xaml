@@ -20,7 +20,7 @@
 
     <!-- 墨迹浮动栏画刷（浅色值 = 原 InkToolBar.xaml 本地定义） -->
     <SolidColorBrush x:Key="FloatBarBackground" Opacity="0.75" Color="#F5F5F7"/>
-    <SolidColorBrush x:Key="FloatBarBackgroundWithoutOpacity" Color="#F5F5F7"/>
+    <SolidColorBrush x:Key="FloatBarBackgroundWithoutOpacity" Color="#FAFAFA"/>
     <SolidColorBrush x:Key="FloatBarBorderBrush" Opacity="0.8" Color="Black"/>
     <!-- 主题色按钮专用描边（浅灰，区别于共用的 FloatBarBorderBrush 近黑） -->
     <SolidColorBrush x:Key="AccentButtonBorderBrush" Color="#D4D4D4"/>

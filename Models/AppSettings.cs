@@ -29,9 +29,9 @@ public class AppSettings
     [JsonPropertyName("isPauseInkToShapeEnabled")]
     public bool IsPauseInkToShapeEnabled { get; set; } = true;
 
-    /// <summary>停顿强制识别相似度门槛（0~100，直接作为百分比门槛；默认 75）。</summary>
+    /// <summary>停顿强制识别相似度门槛（0~100，直接作为百分比门槛；默认 50）。</summary>
     [JsonPropertyName("pauseInkToShapeSensitivity")]
-    public int PauseInkToShapeSensitivity { get; set; } = 75;
+    public int PauseInkToShapeSensitivity { get; set; } = 50;
 
     /// <summary>停顿触发强制识别时间（ms，50~5000，默认 1000）。</summary>
     [JsonPropertyName("pauseInkToShapeDelayMs")]
@@ -69,9 +69,9 @@ public class AppSettings
     [JsonPropertyName("eraserModeByStrokeSetting")]
     public bool EraserModeByStrokeSetting { get; set; } = false;
 
-    /// <summary>清空墨迹后自动切换模式（PDF 橡皮菜单滑动清空）：0=保持在橡皮，1=切换到鼠标，2=切换到墨迹，3=切换到选择。默认 1=鼠标。</summary>
+    /// <summary>清空墨迹后自动切换模式（PDF 橡皮菜单滑动清空）：0=保持在橡皮，1=切换到鼠标，2=切换到墨迹，3=切换到选择。默认 2=墨迹。</summary>
     [JsonPropertyName("clearInkAutoSwitchMode")]
-    public int ClearInkAutoSwitchMode { get; set; } = 1;
+    public int ClearInkAutoSwitchMode { get; set; } = 2;
 
     /// <summary>画板橡皮菜单滑动清空后自动切换模式，取值同上；默认 2=墨迹（与画板清屏前先回画笔的既有行为一致）。与 PDF 侧不互通。</summary>
     [JsonPropertyName("boardClearInkAutoSwitchMode")]
