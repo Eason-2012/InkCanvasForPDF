@@ -4,7 +4,7 @@
 #endif
 
 #define MyAppName "InkCanvasForPDF"
-#define MyAppVersion "0.20.1-Dev"
+#define MyAppVersion "0.20.4-Dev"
 #define MyAppPublisher "@Eason-2012"
 #define MyAppURL "https://github.com/Eason-2012/InkCanvasForPDF"
 #define MyAppExeName "InkCanvasForPDF.exe"
@@ -53,8 +53,8 @@ Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.i
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "C:\Users\ncljh\Documents\ClassPDF\main\bin\Release\net10.0-windows10.0.19041.0\win-{#Arch}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "C:\Users\ncljh\Documents\ClassPDF\main\bin\Release\net10.0-windows10.0.19041.0\win-{#Arch}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "C:\Users\ncljh\Documents\ClassPDF\main\bin\Release\net10.0-windows10.0.19041.0\win-{#Arch}\publish\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "C:\Users\ncljh\Documents\ClassPDF\main\bin\Release\net10.0-windows10.0.19041.0\win-{#Arch}\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 ; 覆盖安装保留 Data：本节不登记 Data，安装期也无任何删除逻辑，同 AppId 升级只覆盖已登记文件
 
