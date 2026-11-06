@@ -17,8 +17,9 @@ public class AppSettings
     [JsonPropertyName("isInkToShapeEnabled")]
     public bool IsInkToShapeEnabled { get; set; } = false;
 
-    /// <summary>多指书写：true=允许多指同时在 PDF 上书写（停用第 2 指停墨抑制）；false=第 2 指停墨让位双指手势。</summary>
-    [JsonPropertyName("isMultiFingerInkEnabled")]
+    /// <summary>多指书写：true=允许多指同时在 PDF 上书写（停用第 2 指停墨抑制）；false=第 2 指停墨让位双指手势。
+    /// 不入 Settings.json，随 view_state 按 PDF 存墨迹库。</summary>
+    [JsonIgnore]
     public bool IsMultiFingerInkEnabled { get; set; } = false;
 
     /// <summary>墨迹识别相似度门槛（0~100，直接作为百分比门槛；值越大纠正越严格，默认 75）。</summary>
@@ -41,32 +42,33 @@ public class AppSettings
     [JsonPropertyName("pauseInkToShapeTolerancePx")]
     public int PauseInkToShapeTolerancePx { get; set; } = 5;
 
-    /// <summary>墨迹类型记忆：0=硬笔（关压感），1=软笔（开压感），2=荧光笔（上次启用的页签）。</summary>
-    [JsonPropertyName("inkType")]
+    /// <summary>墨迹类型记忆：0=硬笔（关压感），1=软笔（开压感），2=荧光笔（上次启用的页签）。
+    /// 不入 Settings.json，随 view_state 按 PDF 存墨迹库。</summary>
+    [JsonIgnore]
     public int InkType { get; set; } = 0;
 
-    /// <summary>画笔共用记忆色索引（硬笔/软笔共用，0~8 画笔色；默认 1=红）。</summary>
-    [JsonPropertyName("penColor")]
+    /// <summary>画笔共用记忆色索引（硬笔/软笔共用，0~8 画笔色；默认 1=红）。不入 Settings.json，随 view_state 按 PDF 存墨迹库。</summary>
+    [JsonIgnore]
     public int PenColor { get; set; } = 1;
 
-    /// <summary>画笔共用记忆粗细（硬笔/软笔共用，1~30，默认 5）。</summary>
-    [JsonPropertyName("penWidth")]
+    /// <summary>画笔共用记忆粗细（硬笔/软笔共用，1~30，默认 5）。不入 Settings.json，随 view_state 按 PDF 存墨迹库。</summary>
+    [JsonIgnore]
     public double PenWidth { get; set; } = 5;
 
-    /// <summary>荧光笔记忆色索引：101~106（默认 103=黄）。</summary>
-    [JsonPropertyName("highlighterColor")]
+    /// <summary>荧光笔记忆色索引：101~106（默认 103=黄）。不入 Settings.json，随 view_state 按 PDF 存墨迹库。</summary>
+    [JsonIgnore]
     public int HighlighterColor { get; set; } = 103;
 
-    /// <summary>荧光笔记忆粗细（1~30，默认 5）。</summary>
-    [JsonPropertyName("highlighterWidth")]
+    /// <summary>荧光笔记忆粗细（1~30，默认 5）。不入 Settings.json，随 view_state 按 PDF 存墨迹库。</summary>
+    [JsonIgnore]
     public double HighlighterWidth { get; set; } = 5;
 
-    /// <summary>橡皮粗细滑块值（1~30，实际擦除直径 = 15 + 3.5 × 值 → 18.5~120）。</summary>
-    [JsonPropertyName("eraserSizeSetting")]
+    /// <summary>橡皮粗细滑块值（1~30，实际擦除直径 = 15 + 3.5 × 值 → 18.5~120）。不入 Settings.json，随 view_state 按 PDF 存墨迹库。</summary>
+    [JsonIgnore]
     public int EraserSizeSetting { get; set; } = 10;
 
-    /// <summary>橡皮模式记忆：false=面积擦，true=墨迹擦（PDF 橡皮菜单与画板橡皮菜单共享）。</summary>
-    [JsonPropertyName("eraserModeByStrokeSetting")]
+    /// <summary>橡皮模式记忆：false=面积擦，true=墨迹擦（PDF 橡皮菜单与画板橡皮菜单共享）。不入 Settings.json，随 view_state 按 PDF 存墨迹库。</summary>
+    [JsonIgnore]
     public bool EraserModeByStrokeSetting { get; set; } = false;
 
     /// <summary>清空墨迹后自动切换模式（PDF 橡皮菜单滑动清空）：0=保持在橡皮，1=切换到鼠标，2=切换到墨迹，3=切换到选择。默认 2=墨迹。</summary>
@@ -117,21 +119,17 @@ public class AppSettings
     [JsonPropertyName("inkColor")]
     public int InkColor { get; set; } = 1;
 
-    /// <summary>荧光笔不透明度（20~240，对应 alpha；荧光笔页签专属记忆）。</summary>
-    [JsonPropertyName("inkAlpha")]
+    /// <summary>荧光笔不透明度（20~240，对应 alpha；荧光笔页签专属记忆）。不入 Settings.json，随 view_state 按 PDF 存墨迹库。</summary>
+    [JsonIgnore]
     public int InkAlpha { get; set; } = 120;
 
-    /// <summary>调色盘主题：true=亮系，false=暗系（默认暗系）。</summary>
-    [JsonPropertyName("useLightThemeColor")]
+    /// <summary>调色盘主题：true=亮系，false=暗系（默认暗系）。不入 Settings.json，随 view_state 按 PDF 存墨迹库。</summary>
+    [JsonIgnore]
     public bool UseLightThemeColor { get; set; } = false;
 
     /// <summary>颜色主题：0=浅色，1=深色，2=跟随系统（抄 ICA Settings.Appearance.Theme；默认跟随系统）。</summary>
     [JsonPropertyName("theme")]
     public int Theme { get; set; } = 2;
-
-    /// <summary>形状面板固定状态（true=固定：仅图形/批注按钮可关面板；false=自动隐藏：点形状或点外部即关）。</summary>
-    [JsonPropertyName("isShapePanelPinned")]
-    public bool IsShapePanelPinned { get; set; } = false;
 
     /// <summary>保留双曲线渐近线（PDF 与画板通用）：0=是（保留）、1=否（画完即移除）、2=每次询问。</summary>
     [JsonPropertyName("hyperbolaAsymptoteOption")]
@@ -212,4 +210,10 @@ public class AppSettings
     /// <summary>已展示过更新日志弹窗的版本（空=从未展示；与当前版本不同且存在对应 Release 时首启弹窗）。</summary>
     [JsonPropertyName("shownChangelogVersion")]
     public string ShownChangelogVersion { get; set; } = "";
+
+    // ══ 画板（原 exe 根目录独立 Settings.json 的 ICA 遗留节）══
+
+    /// <summary>画板设置（2026-11 并入主设置；与 PDF 侧字段互不共享——笔色/粗细等各自独立记忆）。</summary>
+    [JsonPropertyName("board")]
+    public InkCanvasForPDF.Board.Settings Board { get; set; } = new();
 }

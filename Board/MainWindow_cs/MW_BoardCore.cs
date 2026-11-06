@@ -1,7 +1,6 @@
 #nullable disable warnings
 
 using System;
-using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Ink;
@@ -9,9 +8,9 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using InkCanvasForPDF.Controls;
+using InkCanvasForPDF.Services;
 using iNKORE.UI.WPF.Modern.Controls;
 using iNKORE.UI.WPF.Modern;
-using Newtonsoft.Json;
 
 namespace InkCanvasForPDF.Board
 {
@@ -22,7 +21,6 @@ namespace InkCanvasForPDF.Board
         #region 共享字段（ICA 定义位置）
 
         public static Settings Settings = new Settings();          // ICA MainWindow.xaml.cs:167
-        public static string settingsFileName = "Settings.json";   // ICA MainWindow.xaml.cs:168
         public bool isLoaded = false;                              // ICA MainWindow.xaml.cs:169
         public int currentMode = 0;                                // ICA MW_FloatBarIcons.cs:1029
         public bool forceEraser = false;                           // ICA MW_FloatBarIcons.cs:971
@@ -172,23 +170,18 @@ namespace InkCanvasForPDF.Board
 
         private void LoadSettings(bool isFirst)
         {
-            // ICA MW_SettingsToLoad 的设置加载精简移植：仅从运行目录读取 Settings.json
+            // 并入主设置：画板节 = Data\Settings.json 的 board 字段（与主设置共享同一实例）
             try
             {
-                string path = Path.Combine(AppContext.BaseDirectory, settingsFileName);
-                if (File.Exists(path))
-                {
-                    var loaded = JsonConvert.DeserializeObject<Settings>(File.ReadAllText(path));
-                    if (loaded != null) Settings = loaded;
-                }
+                var s = SettingsService.Load().Board;
+                Settings = s ?? new Settings();
             }
             catch { }
         }
 
         public static void SaveSettingsToFile()
         {
-            string text = JsonConvert.SerializeObject(Settings, Formatting.Indented);
-            try { File.WriteAllText(Path.Combine(AppContext.BaseDirectory, settingsFileName), text); }
+            try { SettingsService.Save(SettingsService.Load()); }
             catch { }
         }
 
@@ -370,13 +363,34 @@ namespace InkCanvasForPDF.Board
             }
         }
 
+        private bool _boardShapeFinishPending;   // 触摸抬手的形状收尾已排队（见 PDF 同款修复：避免在触摸事件内同步泵弹窗）
+
+        /// <summary>把形状收尾延后到输入路由结束之后（Background 低于 Input）：触摸事件内同步
+        /// 泵 iuwm ContentDialog 会把触摸提升/捕获释放堵在当前栈 → 弹窗按钮长期点不动。</summary>
+        private void ScheduleBoardShapeFinish(object sender)
+        {
+            if (_boardShapeFinishPending) return;
+            _boardShapeFinishPending = true;
+            isShapeFinishing = true;   // 延迟窗口内屏蔽预览帧（ShapeDrawing_MouseUp 的 finally 会复位）
+            isMouseDown = false;       // 立即停掉形状预览
+            inkCanvas.Dispatcher.BeginInvoke(
+                System.Windows.Threading.DispatcherPriority.Background,
+                new Action(() =>
+                {
+                    if (!_boardShapeFinishPending) return;
+                    _boardShapeFinishPending = false;
+                    inkCanvas_MouseUp(sender, null);
+                }));
+        }
+
         private void inkCanvas_MouseUp(object sender, MouseButtonEventArgs e)
         {
+            if (_boardShapeFinishPending) return;   // 触摸路径已排队，交给 Background 回调完成
             // 形状绘制抬笔定型（ICA MW_ShapeDrawing.cs:1487-1633 形状部分；isMouseDown 复位在此完成）
             ShapeDrawing_MouseUp();
 
             // 面积擦提交并复位（ICA L1590-1595）：累加器必须在此清空，否则下次擦除撞“重复的笔画”
-            if (ReplacedStroke != null)
+            if (!_eraseGestureBatchGuard && ReplacedStroke != null)
             {
                 timeMachine.CommitStrokeEraseHistory(ReplacedStroke, AddedStroke);
                 AddedStroke = null;
@@ -409,7 +423,10 @@ namespace InkCanvasForPDF.Board
         // ICA L1286-1293：触摸抬手 → 走鼠标抬手收尾（触摸擦除的提交入口）；全部手指抬起后复位形状等待标志
         private void Main_Grid_TouchUp(object sender, TouchEventArgs e)
         {
-            inkCanvas_MouseUp(sender, null);
+            if (drawingShapeMode != 0)
+                ScheduleBoardShapeFinish(sender);   // 形状收尾可能弹窗：延后到触摸路由结束之后
+            else
+                inkCanvas_MouseUp(sender, null);    // 擦除批处理必须同步提交，不能延迟
             if (dec.Count == 0)
             {
                 isWaitUntilNextTouchDown = false;

@@ -92,25 +92,25 @@ namespace InkCanvasForPDF.Board
         Dictionary<int, Color> inkColorLightThemeMapping = new Dictionary<int, Color>
         {
             { 0, Colors.Black }, // Black
-            { 1, Color.FromRgb(239, 68, 68) }, // Red
-            { 2, Color.FromRgb(34, 197, 94) }, // Green
-            { 3, Color.FromRgb(59, 130, 246) }, // Blue
+            { 1, Color.FromRgb(255, 18, 0) }, // Red
+            { 2, Color.FromRgb(102, 213, 82) }, // Green
+            { 3, Color.FromRgb(21, 167, 212) }, // Blue
             { 4, Color.FromRgb(250, 204, 21) }, // Yellow
             { 5, Colors.White }, // White
-            { 6, Color.FromRgb(236, 72, 153) }, // Pink
-            { 7, Color.FromRgb(20, 184, 166) }, // Teal
+            { 6, Color.FromRgb(250, 97, 174) }, // Pink（昌平线标志色）
+            { 7, Color.FromRgb(53, 189, 189) }, // Teal（17号线标志色）
             { 8, Color.FromRgb(249, 115, 22) }, // Orange
         };
         Dictionary<int, Color> inkColorDarkThemeMapping = new Dictionary<int, Color>
         {
             { 0, Colors.Black }, // Black
             { 1, Color.FromRgb(220, 38, 38) }, // Red
-            { 2, Color.FromRgb(22, 163, 74) }, // Green
-            { 3, Color.FromRgb(37, 99, 235) }, // Blue
+            { 2, Color.FromRgb(48, 108, 1) }, // Green
+            { 3, Color.FromRgb(0, 96, 152) }, // Blue（2号线标志色）
             { 4, Color.FromRgb(234, 179, 8) }, // Yellow
             { 5, Colors.White }, // White
-            { 6, Color.FromRgb(147, 51, 234) }, // Pink (Purple)
-            { 7, Color.FromRgb(13, 148, 136) }, // Teal
+            { 6, Color.FromRgb(166, 35, 140) }, // Pink (Purple)（5号线标志色）
+            { 7, Color.FromRgb(20, 161, 168) }, // Teal（4号线标志色）
             { 8, Color.FromRgb(234, 88, 12) }  // Orange
         };
 
@@ -178,23 +178,23 @@ namespace InkCanvasForPDF.Board
             if (isUselightThemeColor)
             { // 亮系
                 // Red
-                BoardBorderPenColorRed.Background = new SolidColorBrush(Color.FromRgb(239, 68, 68));
-                BoardBorderPenColorRed.Background = new SolidColorBrush(Color.FromRgb(239, 68, 68));
+                BoardBorderPenColorRed.Background = new SolidColorBrush(Color.FromRgb(255, 18, 0));
+                BoardBorderPenColorRed.Background = new SolidColorBrush(Color.FromRgb(255, 18, 0));
                 // Green
-                BoardBorderPenColorGreen.Background = new SolidColorBrush(Color.FromRgb(34, 197, 94));
-                BoardBorderPenColorGreen.Background = new SolidColorBrush(Color.FromRgb(34, 197, 94));
+                BoardBorderPenColorGreen.Background = new SolidColorBrush(Color.FromRgb(102, 213, 82));
+                BoardBorderPenColorGreen.Background = new SolidColorBrush(Color.FromRgb(102, 213, 82));
                 // Blue
-                BoardBorderPenColorBlue.Background = new SolidColorBrush(Color.FromRgb(59, 130, 246));
-                BoardBorderPenColorBlue.Background = new SolidColorBrush(Color.FromRgb(59, 130, 246));
+                BoardBorderPenColorBlue.Background = new SolidColorBrush(Color.FromRgb(21, 167, 212));
+                BoardBorderPenColorBlue.Background = new SolidColorBrush(Color.FromRgb(21, 167, 212));
                 // Yellow
                 BoardBorderPenColorYellow.Background = new SolidColorBrush(Color.FromRgb(250, 204, 21));
                 BoardBorderPenColorYellow.Background = new SolidColorBrush(Color.FromRgb(250, 204, 21));
                 // Pink ( Purple )
-                BoardBorderPenColorPink.Background = new SolidColorBrush(Color.FromRgb(236, 72, 153));
-                BoardBorderPenColorPink.Background = new SolidColorBrush(Color.FromRgb(236, 72, 153));
+                BoardBorderPenColorPink.Background = new SolidColorBrush(Color.FromRgb(250, 97, 174));
+                BoardBorderPenColorPink.Background = new SolidColorBrush(Color.FromRgb(250, 97, 174));
                 // Teal
-                BoardBorderPenColorTeal.Background = new SolidColorBrush(Color.FromRgb(20, 184, 166));
-                BoardBorderPenColorTeal.Background = new SolidColorBrush(Color.FromRgb(20, 184, 166));
+                BoardBorderPenColorTeal.Background = new SolidColorBrush(Color.FromRgb(53, 189, 189));
+                BoardBorderPenColorTeal.Background = new SolidColorBrush(Color.FromRgb(53, 189, 189));
                 // Orange
                 BoardBorderPenColorOrange.Background = new SolidColorBrush(Color.FromRgb(249, 115, 22));
 
@@ -207,20 +207,20 @@ namespace InkCanvasForPDF.Board
                 BoardBorderPenColorRed.Background = new SolidColorBrush(Color.FromRgb(220, 38, 38));
                 BoardBorderPenColorRed.Background = new SolidColorBrush(Color.FromRgb(220, 38, 38));
                 // Green
-                BoardBorderPenColorGreen.Background = new SolidColorBrush(Color.FromRgb(22, 163, 74));
-                BoardBorderPenColorGreen.Background = new SolidColorBrush(Color.FromRgb(22, 163, 74));
+                BoardBorderPenColorGreen.Background = new SolidColorBrush(Color.FromRgb(48, 108, 1));
+                BoardBorderPenColorGreen.Background = new SolidColorBrush(Color.FromRgb(48, 108, 1));
                 // Blue
-                BoardBorderPenColorBlue.Background = new SolidColorBrush(Color.FromRgb(37, 99, 235));
-                BoardBorderPenColorBlue.Background = new SolidColorBrush(Color.FromRgb(37, 99, 235));
+                BoardBorderPenColorBlue.Background = new SolidColorBrush(Color.FromRgb(0, 96, 152));
+                BoardBorderPenColorBlue.Background = new SolidColorBrush(Color.FromRgb(0, 96, 152));
                 // Yellow
                 BoardBorderPenColorYellow.Background = new SolidColorBrush(Color.FromRgb(234, 179, 8));
                 BoardBorderPenColorYellow.Background = new SolidColorBrush(Color.FromRgb(234, 179, 8));
                 // Pink ( Purple )
-                BoardBorderPenColorPink.Background = new SolidColorBrush(Color.FromRgb(147, 51, 234));
-                BoardBorderPenColorPink.Background = new SolidColorBrush(Color.FromRgb(147, 51, 234));
+                BoardBorderPenColorPink.Background = new SolidColorBrush(Color.FromRgb(166, 35, 140));
+                BoardBorderPenColorPink.Background = new SolidColorBrush(Color.FromRgb(166, 35, 140));
                 // Teal
-                BoardBorderPenColorTeal.Background = new SolidColorBrush(Color.FromRgb(13, 148, 136));
-                BoardBorderPenColorTeal.Background = new SolidColorBrush(Color.FromRgb(13, 148, 136));
+                BoardBorderPenColorTeal.Background = new SolidColorBrush(Color.FromRgb(20, 161, 168));
+                BoardBorderPenColorTeal.Background = new SolidColorBrush(Color.FromRgb(20, 161, 168));
                 // Orange
                 BoardBorderPenColorOrange.Background = new SolidColorBrush(Color.FromRgb(234, 88, 12));
                 BoardBorderPenColorOrange.Background = new SolidColorBrush(Color.FromRgb(234, 88, 12));
@@ -481,11 +481,11 @@ namespace InkCanvasForPDF.Board
             }
         }
 
-        /// <summary>切换画板墨迹类型（0=硬笔 1=软笔 2=荧光笔）：装入该类型记忆的粗细（硬/软笔共用）；
-        /// 硬/软笔颜色装入共享记忆色（PenColor）；按画布黑白覆盖（白底→黑 0、黑底→白 5）只发生在
-        /// 进入画板（EnterBoard）与存储值非法时（canvasColorOverride），切页签不覆盖；
-        /// 荧光笔装入记忆色；压感随硬/软笔切换（荧光笔保持上次值，其本身豁免时间笔锋武装）。调用方随后 CheckColorTheme 刷新 UI。</summary>
-        private void ApplyBoardInkType(int type, bool canvasColorOverride)
+        /// <summary>切换画板墨迹类型（0=硬笔 1=软笔 2=荧光笔）：装入该类型记忆的粗细（硬/软笔共用）与记忆色
+        /// （同 PDF 打开恢复）；硬/软笔记忆色仅在存储值非法（0~8 外）或与画布同色不可见（白板存白 5、黑板存黑 0）
+        /// 时按画布取反兜底（白底黑笔、黑底白笔），切页签不覆盖；荧光笔装入记忆色（本就不受画布影响）；
+        /// 压感随硬/软笔切换（荧光笔保持上次值，其本身豁免时间笔锋武装）。调用方随后 CheckColorTheme 刷新 UI。</summary>
+        private void ApplyBoardInkType(int type)
         {
             boardInkType = Math.Clamp(type, 0, 2);
             switch (boardInkType)
@@ -503,10 +503,12 @@ namespace InkCanvasForPDF.Board
             else
             {
                 int stored = Settings.Canvas.PenColor;
-                if (canvasColorOverride || stored < 0 || stored > 8)
-                    inkColor = Settings.Canvas.UsingWhiteboard ? 0 : 5;   // 白底黑笔、黑底白笔
-                else
-                    inkColor = stored;
+                bool invisible = stored < 0 || stored > 8
+                    || (Settings.Canvas.UsingWhiteboard && stored == 5)
+                    || (!Settings.Canvas.UsingWhiteboard && stored == 0);
+                inkColor = invisible
+                    ? (Settings.Canvas.UsingWhiteboard ? 0 : 5)   // 白底黑笔、黑底白笔兜底
+                    : stored;                                     // 恢复记忆色（同 PDF）
                 lastBoardInkColor = inkColor;
             }
             if (boardInkType == 0) _pressureEnabled = false;
@@ -514,7 +516,7 @@ namespace InkCanvasForPDF.Board
             RefreshTimePressureArmed();
         }
 
-        /// <summary>墨迹菜单页签切换：旧类型活动值回写记忆 → 装入新类型（LastPenKind 只记硬/软笔）→
+        /// <summary>墨迹菜单页签切换：旧类型活动值回写记忆 → 装入新类型（LastPenKind 记含荧光笔）→
         /// 回填滑块/下拉框 → CheckColorTheme 刷新色板勾标与画笔属性 → 落盘。
         /// 不按画布覆盖颜色：硬/软笔共用 PenColor，切页签保留当前颜色（黑白换色只在进入画板/画布切换时发生）。</summary>
         private void BoardPivotInk_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -524,8 +526,8 @@ namespace InkCanvasForPDF.Board
             if (target < 0 || target == boardInkType) return;
             SaveActiveColorToStore();
             SaveActiveWidthToStore();
-            ApplyBoardInkType(target, canvasColorOverride: false);
-            if (boardInkType <= 1) Settings.Canvas.LastPenKind = boardInkType;   // 荧光笔不记录为"上次启用的画笔"
+            ApplyBoardInkType(target);
+            Settings.Canvas.LastPenKind = boardInkType;   // 记为上次启用页签（含荧光笔）
             SyncBoardInkControls();
             CheckColorTheme();
             SaveSettingsToFile();

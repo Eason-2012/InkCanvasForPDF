@@ -4,9 +4,9 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text.Json.Nodes;
 using InkCanvasForPDF.Models;
 using iNKORE.UI.WPF.Modern.Controls;
-using Newtonsoft.Json.Linq;
 
 namespace InkCanvasForPDF.Services;
 
@@ -86,11 +86,69 @@ public static class UpdateService
         _ => "x64",
     };
 
-    private static Version LocalVersion =>
-        Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0);
+    /// <summary>csproj 的 InformationalVersion 原文（SDK 可能追加 +提交哈希，读取时剥离）。</summary>
+    private static string InformationalVersionText
+    {
+        get
+        {
+            var info = Assembly.GetExecutingAssembly()
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+            if (string.IsNullOrWhiteSpace(info))
+                return "";
+            var plus = info.IndexOf('+');
+            return (plus >= 0 ? info[..plus] : info).Trim();
+        }
+    }
 
-    /// <summary>当前版本号（三段，如 0.20.0，与 Release tag 对齐）。</summary>
-    public static string CurrentVersion => $"{LocalVersion.Major}.{LocalVersion.Minor}.{Math.Max(LocalVersion.Build, 0)}";
+    /// <summary>当前版本号（取 InformationalVersion，保留四位与 -Beta/-Dev 后缀；
+    /// 属性缺失时回退四段程序集版本）。</summary>
+    public static string CurrentVersion
+    {
+        get
+        {
+            var info = InformationalVersionText;
+            return string.IsNullOrEmpty(info)
+                ? (Assembly.GetExecutingAssembly().GetName().Version ?? new Version(1, 0, 0, 0)).ToString()
+                : info;
+        }
+    }
+
+    /// <summary>参与比较的数值版本（剥离 -Beta/-Dev 后缀；缺失时回退程序集版本）。</summary>
+    private static Version LocalVersion
+    {
+        get
+        {
+            var core = StripSuffix(CurrentVersion);
+            return Version.TryParse(core, out var v)
+                ? v
+                : Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0);
+        }
+    }
+
+    /// <summary>去掉 +构建元数据与 -Beta/-Dev 等后缀，只留数字部分。</summary>
+    private static string StripSuffix(string version)
+    {
+        var plus = version.IndexOf('+');
+        if (plus >= 0) version = version[..plus];
+        var dash = version.IndexOf('-');
+        return dash >= 0 ? version[..dash] : version;
+    }
+
+    /// <summary>补足为四段（Build/Revision 缺省按 0），使三段 tag 与四段版本可比较。</summary>
+    private static Version NormalizeVersion(Version v) =>
+        new(v.Major, v.Minor, Math.Max(v.Build, 0), Math.Max(v.Revision, 0));
+
+    /// <summary>解析 Release tag（去 v/V 前缀与后缀，兼容三段/四段）。</summary>
+    private static bool TryParseTagVersion(string tag, out Version version)
+    {
+        if (Version.TryParse(StripSuffix(tag.TrimStart('v', 'V')), out var parsed))
+        {
+            version = parsed;
+            return true;
+        }
+        version = new Version(0, 0);
+        return false;
+    }
 
     // ══════════ 状态机 ══════════
 
@@ -126,7 +184,7 @@ public static class UpdateService
     {
         if (string.IsNullOrEmpty(s.DownloadedUpdateVersion))
             return;
-        if (Version.TryParse(s.DownloadedUpdateVersion, out var v) && v <= LocalVersion)
+        if (Version.TryParse(s.DownloadedUpdateVersion, out var v) && NormalizeVersion(v) <= NormalizeVersion(LocalVersion))
         {
             ConsoleLog.Write("应用更新", $"清理已装标记: 版本={v} ≤ 当前={CurrentVersion}");
             s.DownloadedUpdateVersion = "";
@@ -149,15 +207,19 @@ public static class UpdateService
     // ══════════ 检查 ══════════
 
     /// <summary>拉取 Releases 列表（带代理前缀）。</summary>
-    private static async Task<JArray> FetchReleasesAsync(AppSettings s, CancellationToken ct)
+    private static async Task<JsonArray> FetchReleasesAsync(AppSettings s, CancellationToken ct)
     {
         var url = (s.UpdateProxy ?? "") + ReleasesApiUrl;
         using var response = await Client.GetAsync(url, ct);
         response.EnsureSuccessStatusCode();
 
         var json = await response.Content.ReadAsStringAsync(ct);
-        return JArray.Parse(json);
+        return JsonNode.Parse(json) as JsonArray ?? new JsonArray();
     }
+
+    /// <summary>取 JSON 字符串字段（缺失/JSON null/非字符串返回空串）。</summary>
+    private static string GetString(JsonObject o, string key) =>
+        o[key] is JsonValue v && v.TryGetValue(out string? s) ? s ?? "" : "";
 
     /// <summary>调 GitHub Releases API 比较版本号；有更新返回结果，无更新返回 null。</summary>
     /// <exception cref="InvalidOperationException">Release 中缺少本机架构安装包。</exception>
@@ -165,34 +227,35 @@ public static class UpdateService
     {
         var releases = await FetchReleasesAsync(s, ct);
 
-        foreach (var item in releases.OfType<JObject>())
+        foreach (var item in releases.OfType<JsonObject>())
         {
-            var isPrerelease = item.Value<bool?>("prerelease") ?? false;
+            var isPrerelease = item["prerelease"] is JsonValue pv && pv.TryGetValue(out bool pre) && pre;
             if (s.UpdateChannel == 0 && isPrerelease)   // 稳定通道跳过 Pre-release
                 continue;
 
-            var tag = item.Value<string>("tag_name") ?? "";
-            if (!Version.TryParse(tag.TrimStart('v', 'V'), out var remote))
+            var tag = GetString(item, "tag_name");
+            if (!TryParseTagVersion(tag, out var remote))
                 continue;                               // 列表按发布时间倒序，第一个可解析的即通道最新版
 
-            if (remote <= LocalVersion)
+            if (NormalizeVersion(remote) <= NormalizeVersion(LocalVersion))
                 return null;                            // 已是最新
 
             var assetUrl = FindAsset(item, SetupFileName)
                 ?? throw new InvalidOperationException($"版本 {tag} 未提供 {SetupFileName} 安装包");
-            var body = item.Value<string>("body") ?? "";
+            var body = GetString(item, "body");
             return new UpdateCheckResult(remote.ToString(), assetUrl, body, isPrerelease);
         }
 
         return null;
     }
 
-    private static string? FindAsset(JObject release, string fileName)
+    private static string? FindAsset(JsonObject release, string fileName)
     {
-        foreach (var asset in release["assets"]?.OfType<JObject>() ?? Enumerable.Empty<JObject>())
+        if (release["assets"] is not JsonArray assets) return null;
+        foreach (var asset in assets.OfType<JsonObject>())
         {
-            if (asset.Value<string>("name") == fileName)
-                return asset.Value<string>("browser_download_url");
+            if (GetString(asset, "name") != fileName) continue;
+            return asset["browser_download_url"] is JsonValue u && u.TryGetValue(out string? url) ? url : null;
         }
         return null;
     }
@@ -201,11 +264,14 @@ public static class UpdateService
     public static async Task<string?> GetReleaseNotesAsync(AppSettings s, string version, CancellationToken ct = default)
     {
         var releases = await FetchReleasesAsync(s, ct);
-        foreach (var item in releases.OfType<JObject>())
+        foreach (var item in releases.OfType<JsonObject>())
         {
-            var tag = item.Value<string>("tag_name") ?? "";
-            if (string.Equals(tag.TrimStart('v', 'V'), version, StringComparison.OrdinalIgnoreCase))
-                return item.Value<string>("body") ?? "";
+            var tag = GetString(item, "tag_name");
+            if (string.Equals(tag.TrimStart('v', 'V'), version, StringComparison.OrdinalIgnoreCase)
+                || (TryParseTagVersion(tag, out var tagVer)
+                    && Version.TryParse(StripSuffix(version), out var localVer)
+                    && NormalizeVersion(tagVer) == NormalizeVersion(localVer)))
+                return GetString(item, "body");
         }
         return null;
     }

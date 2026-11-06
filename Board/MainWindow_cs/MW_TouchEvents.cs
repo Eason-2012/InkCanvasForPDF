@@ -224,6 +224,9 @@ namespace InkCanvasForPDF.Board
 
         private void Main_Grid_TouchDown(object sender, TouchEventArgs e)
         {
+            if (_eraseGestureBatchGuard)
+                return;   // 双指手势已成立：保持 0.01 失效橡皮，禁止重设真实形状（含面积擦/墨迹擦分支）
+
             if (!isHidingSubPanelsWhenInking)
             {
                 isHidingSubPanelsWhenInking = true;

@@ -10,9 +10,9 @@
     <RuntimeIdentifiers>win-x64;win-x86;win-arm64</RuntimeIdentifiers>
     <AssemblyName>InkCanvasForPDF</AssemblyName>
     <RootNamespace>InkCanvasForPDF</RootNamespace>
-	<AssemblyVersion>0.20.4</AssemblyVersion>
-	<FileVersion>0.20.4</FileVersion>
-	<InformationalVersion>0.20.4-Dev</InformationalVersion>
+	<AssemblyVersion>1.0.0.0</AssemblyVersion>
+	<FileVersion>1.0.0.0</FileVersion>
+	<InformationalVersion>1.0.0.0</InformationalVersion>
 	<ApplicationIcon>Resources\app.ico</ApplicationIcon>
 	</PropertyGroup>
   <ItemGroup>
@@ -22,13 +22,12 @@
 
   <ItemGroup>
     <PackageReference Include="Docnet.Core" Version="2.6.0" />
-    <PackageReference Include="FluentIcons.Wpf" Version="1.1.312" />
-    <PackageReference Include="iNKORE.UI.WPF.Modern" Version="0.10.2" />
-    <PackageReference Include="MdXaml" Version="1.27.0" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <PackageReference Include="FluentIcons.Wpf" Version="2.1.345" />
+    <PackageReference Include="iNKORE.UI.WPF.Modern" Version="0.11.0" />
+    <PackageReference Include="Sage.MarkdownRenderer" Version="1.0.0.10" />
     <PackageReference Include="Carrot.UI.ColorPicker" Version="0.2.1" />
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.13" />
-    <PackageReference Include="System.IO.Hashing" Version="10.0.13" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
+    <PackageReference Include="System.IO.Hashing" Version="10.0.14" />
   </ItemGroup>
 
   <ItemGroup>

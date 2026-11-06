@@ -101,9 +101,9 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>顶部工具栏是否可见（有 PDF、未打开设置、不在打开加载中；与回到主页一致：进设置即隐藏工具栏；
-    /// 加载页为纯云母，白色顶栏在此期间必须隐藏）。</summary>
-    public bool IsToolbarVisible => HasPdf && !IsSettingsVisible && !IsOpeningPdf;
+    /// <summary>顶部工具栏是否可见（有 PDF、不在打开加载中；设置页打开时不硬切隐藏，由不透明覆盖层
+    /// 盖住工具栏，与画板飞入一致；加载页为纯云母，白色顶栏在此期间必须隐藏）。</summary>
+    public bool IsToolbarVisible => HasPdf && !IsOpeningPdf;
 
     private string _pdfName = string.Empty;
 
@@ -166,7 +166,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
 
     private bool _isSettingsVisible;
 
-    /// <summary>设置覆盖层是否显示（切换时通知工具栏可见性，进入设置即隐藏工具栏）。</summary>
+    /// <summary>设置覆盖层是否显示（切换时通知窗口标题）。</summary>
     public bool IsSettingsVisible
     {
         get => _isSettingsVisible;
@@ -174,7 +174,6 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         {
             if (SetField(ref _isSettingsVisible, value))
             {
-                OnPropertyChanged(nameof(IsToolbarVisible));
                 OnPropertyChanged(nameof(WindowTitle));
             }
         }
@@ -443,6 +442,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
 
             // 回 UI 线程：建集合 + 后续懒加载（InkStore 只在 UI 线程赋值/读取）
             InkStore = sizes.store;
+            ApplyDocumentMenuState(sizes.viewState);   // 菜单记忆回读（先复位代码默认，再按键覆盖）
             PdfName = Path.GetFileNameWithoutExtension(path);
             HasPdf = true;
             await ReloadPages(sizes.pageSizes, sizes.thumbSizes);
@@ -491,6 +491,57 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
             MessageBox.Show($"PDF 打开失败：{ex.Message}", "InkCanvasForPDF",
                 MessageBoxButton.OK, MessageBoxImage.Error);
         }
+    }
+
+    /// <summary>文档打开时回读菜单记忆（per-PDF 墨迹库 view_state）：先把迁移字段重置为代码默认
+    /// （防止继承上一个 PDF 的值，同 ZoomLevel 复位语义），再逐键覆盖，最后按构造函数同款顺序灌入 InkTool。
+    /// 键缺失/解析失败保留默认；无库文档（自动保存关闭）自然全走默认。</summary>
+    private void ApplyDocumentMenuState(IReadOnlyDictionary<string, string> viewState)
+    {
+        var def = new AppSettings();
+        Settings.InkType = def.InkType;
+        Settings.PenColor = def.PenColor;
+        Settings.PenWidth = def.PenWidth;
+        Settings.HighlighterColor = def.HighlighterColor;
+        Settings.HighlighterWidth = def.HighlighterWidth;
+        Settings.InkAlpha = def.InkAlpha;
+        Settings.UseLightThemeColor = def.UseLightThemeColor;
+        Settings.IsMultiFingerInkEnabled = def.IsMultiFingerInkEnabled;
+        Settings.EraserSizeSetting = def.EraserSizeSetting;
+        Settings.EraserModeByStrokeSetting = def.EraserModeByStrokeSetting;
+
+        if (viewState.TryGetValue("pdf_ink_type", out var s1)
+            && int.TryParse(s1, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v1))
+            Settings.InkType = Math.Clamp(v1, 0, 2);
+        if (viewState.TryGetValue("pdf_pen_color", out var s2)
+            && int.TryParse(s2, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v2))
+            Settings.PenColor = v2;
+        if (viewState.TryGetValue("pdf_pen_width", out var s3)
+            && double.TryParse(s3, NumberStyles.Float, CultureInfo.InvariantCulture, out var v3))
+            Settings.PenWidth = v3;
+        if (viewState.TryGetValue("pdf_hl_color", out var s4)
+            && int.TryParse(s4, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v4))
+            Settings.HighlighterColor = v4;
+        if (viewState.TryGetValue("pdf_hl_width", out var s5)
+            && double.TryParse(s5, NumberStyles.Float, CultureInfo.InvariantCulture, out var v5))
+            Settings.HighlighterWidth = v5;
+        if (viewState.TryGetValue("pdf_ink_alpha", out var s6)
+            && int.TryParse(s6, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v6))
+            Settings.InkAlpha = v6;
+        if (viewState.TryGetValue("pdf_palette_light", out var s7))
+            Settings.UseLightThemeColor = s7 == "1";
+        if (viewState.TryGetValue("pdf_multi_finger", out var s8))
+            Settings.IsMultiFingerInkEnabled = s8 == "1";
+        if (viewState.TryGetValue("pdf_eraser_size", out var s9)
+            && int.TryParse(s9, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v9))
+            Settings.EraserSizeSetting = v9;
+        if (viewState.TryGetValue("pdf_eraser_bystroke", out var s10))
+            Settings.EraserModeByStrokeSetting = s10 == "1";
+
+        InkTool.EraserSize = InkToolViewModel.EraserSizeFromSlider(Settings.EraserSizeSetting);   // 橡皮粗细 → 实际直径
+        InkTool.IsStrokeEraser = Settings.EraserModeByStrokeSetting;   // 橡皮模式（面积擦/墨迹擦）
+        InkTool.IsUselightThemeColor = Settings.UseLightThemeColor;
+        InkTool.LoadFromSettings(Settings);   // 装入各类型记忆并按记忆页签装入活动值
     }
 
     /// <summary>启动首屏就绪轮询：恢复位置后视口内页面位图全部就位才撤加载页；超时兜底强制退出。</summary>

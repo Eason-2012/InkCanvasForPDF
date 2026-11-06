@@ -185,13 +185,13 @@ public sealed class InkToolViewModel : ViewModelBase
     public static readonly Dictionary<int, Color> PenLightColorMap = new()
     {
         [0] = Colors.Black,                       // 黑
-        [1] = Color.FromRgb(239, 68, 68),         // 红
-        [2] = Color.FromRgb(34, 197, 94),         // 绿
-        [3] = Color.FromRgb(59, 130, 246),        // 蓝
+        [1] = Color.FromRgb(255, 18, 0),          // 红
+        [2] = Color.FromRgb(102, 213, 82),        // 绿
+        [3] = Color.FromRgb(21, 167, 212),        // 蓝
         [4] = Color.FromRgb(250, 204, 21),        // 黄
         [5] = Colors.White,                       // 白
-        [6] = Color.FromRgb(236, 72, 153),        // 粉
-        [7] = Color.FromRgb(20, 184, 166),        // 青
+        [6] = Color.FromRgb(250, 97, 174),        // 粉（昌平线标志色）
+        [7] = Color.FromRgb(53, 189, 189),        // 青（17号线标志色）
         [8] = Color.FromRgb(249, 115, 22)         // 橙
     };
 
@@ -200,12 +200,12 @@ public sealed class InkToolViewModel : ViewModelBase
     {
         [0] = Colors.Black,                       // 黑
         [1] = Color.FromRgb(220, 38, 38),         // 红
-        [2] = Color.FromRgb(22, 163, 74),         // 绿
-        [3] = Color.FromRgb(37, 99, 235),         // 蓝
+        [2] = Color.FromRgb(48, 108, 1),          // 绿
+        [3] = Color.FromRgb(0, 96, 152),          // 蓝（2号线标志色）
         [4] = Color.FromRgb(234, 179, 8),         // 黄
         [5] = Colors.White,                       // 白
-        [6] = Color.FromRgb(147, 51, 234),        // 粉(紫)
-        [7] = Color.FromRgb(13, 148, 136),        // 青
+        [6] = Color.FromRgb(166, 35, 140),        // 粉(紫)（5号线标志色）
+        [7] = Color.FromRgb(20, 161, 168),        // 青（4号线标志色）
         [8] = Color.FromRgb(234, 88, 12)          // 橙
     };
 
@@ -283,7 +283,7 @@ public sealed class InkToolViewModel : ViewModelBase
         InkAlpha = (byte)Math.Clamp(s.InkAlpha, 20, 240);
         InkStyle = Math.Clamp(s.InkStyle, 0, 3);   // 笔锋全局共享
         IsInkToShapeEnabled = s.IsInkToShapeEnabled;   // 墨迹纠正全局共享
-        IsMultiFingerInk = s.IsMultiFingerInkEnabled;   // 多指书写全局共享
+        IsMultiFingerInk = s.IsMultiFingerInkEnabled;   // 多指书写随文档记忆（view_state）
         InkType = (InkPenType)Math.Clamp(s.InkType, 0, 2);
         switch (InkType)
         {

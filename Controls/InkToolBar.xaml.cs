@@ -97,22 +97,10 @@ public partial class InkToolBar : System.Windows.Controls.UserControl
         ViewboxFloatingBar.SizeChanged += (_, _) => ReapplyPlacement();
                 Loaded += (_, _) =>
             {
-                // 启动恢复：MainViewModel 构造已用 LoadFromSettings 装入记忆页签的活动值，此处只回填面板 UI
+                // 启动恢复 + 文档打开回读共用回填（MainViewModel 构造 / ApplyDocumentMenuState 已装入记忆值）
                 if (Vm is { } vm)
                 {
-                    // Pivot 初始页签按记忆的墨迹类型落位（先摘掉处理器避免触发页签切换回写）
-                    PivotInk.SelectionChanged -= PivotInk_SelectionChanged;
-                    PivotInk.SelectedIndex = (int)vm.InkTool.InkType;
-                    PivotInk.SelectionChanged += PivotInk_SelectionChanged;
-                    SyncActiveTabControls();
-                    // 三个页签的多指书写开关同步到 VM 实际值（全局共享）
-                    ToggleSwitchEnableMultiFingerInkHard.IsOn = vm.InkTool.IsMultiFingerInk;
-                    ToggleSwitchEnableMultiFingerInkSoft.IsOn = vm.InkTool.IsMultiFingerInk;
-                    ToggleSwitchEnableMultiFingerInkHighlighter.IsOn = vm.InkTool.IsMultiFingerInk;
-                    // 两个页签（硬笔/软笔）的墨迹纠正开关同步到 VM 实际值（全局共享；荧光笔无此项）
-                    ToggleSwitchEnableInkToShapeHard.IsOn = vm.InkTool.IsInkToShapeEnabled;
-                    ToggleSwitchEnableInkToShapeSoft.IsOn = vm.InkTool.IsInkToShapeEnabled;
-                    // 形状面板固定状态不持久化：默认不置顶（Pin 切换仅本次会话有效）
+                    RestoreMenuControlsFromVm();
                     ApplyShapeHintColor();   // 图形面板提示文字初始颜色按当前主题
                     // 「图形」高亮与 VM 同步（对齐画板）：仅选中形状时高亮图形按钮，退出形状模式按当前工具复位
                     if (!_inkToolHooked)
@@ -193,7 +181,8 @@ public partial class InkToolBar : System.Windows.Controls.UserControl
         ViewboxFloatingBar.Margin = new Thickness(left, top, -2000, -200);
     }
 
-    /// <summary>把当前墨迹选项写回 Data\Settings.json（墨迹类型 + 共用画笔颜色/粗细 + 荧光笔颜色/粗细 + 全局笔锋 + 不透明度 + 亮暗系）。</summary>
+    /// <summary>把当前墨迹选项写入内存：菜单记忆字段（墨迹类型/颜色/粗细/不透明度/亮暗系/多指书写）不入
+    /// Settings.json，随文档关闭写入 per-PDF 墨迹库 view_state；SettingsService.Save 只落笔锋/抬笔纠正等设置页共享项。</summary>
     private void SaveInkOptions()
     {
         if (Vm is not { } vm) return;
@@ -218,6 +207,36 @@ public partial class InkToolBar : System.Windows.Controls.UserControl
         vm.Settings.InkAlpha = t.InkAlpha;
         vm.Settings.UseLightThemeColor = t.IsUselightThemeColor;
         SettingsService.Save(vm.Settings);
+    }
+
+    /// <summary>图形菜单置顶状态（供文档关闭时写入 view_state 的 pdf_shape_pinned）。</summary>
+    internal bool ShapePanelPinned => _shapePanelPinned;
+
+    /// <summary>文档打开时应用持久化的图形菜单置顶状态（赋字段 + 同步图钉字形）。</summary>
+    internal void ApplyShapePinned(bool pinned)
+    {
+        _shapePanelPinned = pinned;
+        BorderDrawShapePin.Glyph = pinned ? "\uE718" : "\uE77a";
+    }
+
+    /// <summary>把墨迹菜单 UI 回填到 VM 当前实际值（页签/粗细与不透明度滑块/多指书写开关/亮暗系色板勾标）。
+    /// 启动 Loaded 与文档打开回读（RestoreInkData）共用；页签先摘处理器防触发页签切换回写。</summary>
+    internal void RestoreMenuControlsFromVm()
+    {
+        if (Vm is not { } vm) return;
+        // Pivot 页签按记忆的墨迹类型落位（先摘掉处理器避免触发页签切换回写）
+        PivotInk.SelectionChanged -= PivotInk_SelectionChanged;
+        PivotInk.SelectedIndex = (int)vm.InkTool.InkType;
+        PivotInk.SelectionChanged += PivotInk_SelectionChanged;
+        SyncActiveTabControls();
+        // 三个页签的多指书写开关同步到 VM 实际值（随文档记忆）
+        ToggleSwitchEnableMultiFingerInkHard.IsOn = vm.InkTool.IsMultiFingerInk;
+        ToggleSwitchEnableMultiFingerInkSoft.IsOn = vm.InkTool.IsMultiFingerInk;
+        ToggleSwitchEnableMultiFingerInkHighlighter.IsOn = vm.InkTool.IsMultiFingerInk;
+        // 两个页签（硬笔/软笔）的墨迹纠正开关同步到 VM 实际值（全局共享；荧光笔无此项）
+        ToggleSwitchEnableInkToShapeHard.IsOn = vm.InkTool.IsInkToShapeEnabled;
+        ToggleSwitchEnableInkToShapeSoft.IsOn = vm.InkTool.IsInkToShapeEnabled;
+        ApplyThemeToPalette();   // 亮暗系色板/图标/勾标按当前记忆重绘
     }
 
     /// <summary>把 VM 当前活动值回填到当前页签的控件（笔锋下拉/粗细滑块；荧光笔页签为不透明度+粗细）。

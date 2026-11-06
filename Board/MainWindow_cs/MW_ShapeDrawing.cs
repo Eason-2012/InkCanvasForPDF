@@ -80,8 +80,11 @@ namespace InkCanvasForPDF.Board
 
             _shapePanelPinned = !_shapePanelPinned;
             BoardBorderDrawShapePin.Glyph = _shapePanelPinned ? "\uE718" : "\uE77a";
-            // 置顶状态不持久化：默认不置顶（仅本次会话有效）
+            // 置顶状态随文档关闭写入 per-PDF 墨迹库 view_state（board_shape_pinned）
         }
+
+        /// <summary>图形菜单置顶状态（供文档关闭时写入 view_state 的 board_shape_pinned）。</summary>
+        internal bool ShapePanelPinned => _shapePanelPinned;
 
         #endregion
 

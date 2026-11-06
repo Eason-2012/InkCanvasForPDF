@@ -11,7 +11,7 @@ using System.Windows.Threading;
 
 namespace InkCanvasForPDF.Services;
 
-/// <summary>时间笔锋的一个采样点（UI 线程写入与读取，改动须持有控制器锁）。</summary>
+/// <summary>时间笔锋的一个采样点（笔线程写入、UI 线程读取，两者都须持有控制器锁）。</summary>
 internal struct TimePressureSample
 {
     public double X;   // 页面坐标（与 Stroke 同一空间，外层整层 ScaleTransform 负责屏幕缩放）
@@ -188,12 +188,6 @@ public sealed class TimePressureController
     private const int CommitOverlap = 1;      // 提交段向前重叠的点数：折线几何逐段确定，重叠区两次绘制完全重合，1 点即可保证段间路径连续
     private const int CommitBatchPoints = 64; // 攒批提交阈值：成熟点攒够该数量才追加一个 committed 视觉（长笔画视觉数 ≈ 总点数/64，而非 ≈ 帧数）
 
-    /// <summary>按位置匹配会话的容差（页面坐标 px）：笔画末点与某会话末采样点在此距离内视为同一笔。</summary>
-    private const double SessionMatchDistance = 40;
-
-    /// <summary>定格兜底的宽松匹配距离（px，3× 主匹配容差）：兜底只服务"确定是这笔"的会话，距离离谱不套。</summary>
-    private const double FallbackSessionDistance = 120;
-
     /// <summary>自绘笔画标记：宿主据此外键从 Stroke 取回 stylus 设备 id（供定格/清场）。</summary>
     public static readonly Guid SelfDrawnDeviceGuid = new("7B0A7E4C-6B2A-4E1F-9E0C-3B1F2C5A8D41");
 
@@ -214,7 +208,7 @@ public sealed class TimePressureController
     private volatile bool _selfDrawAllDevices;// 全部设备由叠加层自绘（多指书写/多触摸）
     private bool _renderingHooked;            // 仅笔画进行中订阅 CompositionTarget.Rendering
 
-    /// <summary>单设备会话（UI 线程采集与渲染，状态改动均持锁）。</summary>
+    /// <summary>单设备会话（笔线程采集、UI 线程渲染，状态改动均持锁）。</summary>
     private sealed class DeviceSession
     {
         public int DeviceId;
@@ -225,7 +219,6 @@ public sealed class TimePressureController
         public double LastBatchEndMs;
         public int CommittedBoundary;   // 已提交（冻结进 committed 层）的采样下标（不含）
         public TimePressureOverlay.SessionLayer? Layer;
-        public int BatchCount;          // 收到的采样批数（取证用）
         public readonly HashSet<(double X, double Y, float P)> Received = new();   // 已接受的输入点（判重用）
         public double LastSampleElapsedMs;   // 最近一次收点时刻（僵死判定用：有它才说明会话仍在收点）
         public bool InProgress;
@@ -272,13 +265,6 @@ public sealed class TimePressureController
         {
             // 平板服务不可用时保持既有缓存（未知按触摸处理）
         }
-    }
-
-    /// <summary>该平板是否是触摸设备（缓存；未知按“非触摸”处理，保证笔/鼠标不受影响）。</summary>
-    internal bool IsTouchTablet(int tabletDeviceId)
-    {
-        lock (_sync)
-            return _stylusTablets.TryGetValue(tabletDeviceId, out bool isStylus) && !isStylus;
     }
 
     /// <summary>页面缩放（外层整层 ScaleTransform），用于把「屏幕针尖宽度」换算回页面坐标。</summary>
@@ -390,8 +376,6 @@ public sealed class TimePressureController
             _sessions[deviceId] = session;   // 同设备重复落笔：旧会话被替换（视觉层在 StartRendering 内重建）
             session.Clock.Restart();
         }
-        // 诊断已暂停（需要取证时取消本行注释）
-        // TimePenDiagnostics.Begin(deviceId, tabletDeviceId);
         OnUi(() => StartRendering(deviceId));
     }
 
@@ -399,8 +383,6 @@ public sealed class TimePressureController
     {
         if (points == null || points.Count == 0)
             return;
-        // 诊断已暂停（需要取证时取消本行注释）
-        // TimePenDiagnostics.Batch(deviceId, points);
         lock (_sync)
         {
             if (!_sessions.TryGetValue(deviceId, out var session) || !session.InProgress)
@@ -465,7 +447,6 @@ public sealed class TimePressureController
                 tPrev = t;
                 session.Samples.Add(new TimePressureSample { X = clean[i].X, Y = clean[i].Y, T = t, P = clean[i].P });
             }
-            session.BatchCount++;
             // 记实际末点时刻（非 tEnd）：兜底超调时仍保证跨批严格单调；正常末点 frac=1 → tPrev==tEnd
             session.LastBatchEndMs = tPrev;
             session.LastSampleElapsedMs = tPrev;   // 僵死判定：仍在持续收点的会话不允许被捕获丢失误杀
@@ -625,6 +606,11 @@ public sealed class TimePressureController
                 {
                     DrawingAttributes = _canvas.DefaultDrawingAttributes.Clone()
                 };
+                // 自绘笔画按采样里的真实压力渲染：DA 是从画布克隆的，会继承宿主各处开关
+                // （荧光笔/关闭笔锋+硬笔时为 true），那会让整笔等宽、真实压力白采。
+                // 软笔（PressureEnabled）下显式关闭忽略压力；荧光笔的"等宽"语义仍由宿主开关决定。
+                if (PressureEnabled && !stroke.DrawingAttributes.IsHighlighter)
+                    stroke.DrawingAttributes.IgnorePressure = false;
                 stroke.AddPropertyData(SelfDrawnDeviceGuid, deviceId);
             }
         }
@@ -785,107 +771,42 @@ public sealed class TimePressureController
 
     // ───────────────────────────── 抬笔定格 ─────────────────────────────
 
-    /// <summary>按笔画末点位置匹配会话（多指安全）：避免"原生命中管线提交的那条笔画"盲取主设备会话
-    /// ——多指并写时主设备可能仍是另一根手指、还没抬笔（UpElapsedMs==0 → 定格会用活时钟把点龄灌大，
-    /// 整笔拍平成 cap）。取各会话末采样点到笔画末点的距离，≤40px 内取最近抬笔者；都超出返回 -1。</summary>
-    private int MatchSessionByStroke(Stroke stroke)
-    {
-        var points = stroke.StylusPoints;
-        if (points.Count == 0)
-            return -1;
-        double px = points[^1].X;
-        double py = points[^1].Y;
-        int best = -1;
-        double bestDist = SessionMatchDistance;
-        double bestUp = -1;
-        lock (_sync)
-        {
-            foreach (var pair in _sessions)
-            {
-                var samples = pair.Value.Samples;
-                if (samples.Count == 0)
-                    continue;
-                var last = samples[^1];
-                double d = Dist(px, py, last.X, last.Y);
-                if (d > SessionMatchDistance)
-                    continue;
-                // 距离明显更近的直接采纳；距离相近（±1px）时取最近抬笔的那支（刚提交完的那笔）
-                if (best == -1 || d < bestDist - 1.0
-                    || (Math.Abs(d - bestDist) <= 1.0 && pair.Value.UpElapsedMs > bestUp))
-                {
-                    best = pair.Key;
-                    bestDist = Math.Min(bestDist, d);
-                    bestUp = pair.Value.UpElapsedMs;
-                }
-            }
-        }
-        return best;
-    }
-
-    /// <summary>主设备重载：先按笔画末点位置匹配会话（多指时防止套用另一根手指的会话），
-    /// 匹配不到再走兜底——兜底只接受「已抬笔（UpElapsedMs>0）且末点距离 ≤ FallbackSessionDistance」的会话：
-    /// 活会话是别的手指还在写，套上会用活时钟把整笔点龄灌大 → 拍平成等宽（多指丢压感根因之一；
-    /// 原 latestUp 初值 -1 时未抬笔会话的 0 也会胜出）。都不满足则不改写、保留原生压力。</summary>
+    /// <summary>主设备重载：取主设备会话；画板多触摸模式下原生收墨的是数位笔（可能是副会话），
+    /// 先按"数位笔平板 + 最近抬笔"选；都不匹配时退回主设备/唯一会话，仍无则不改写、保持原样。</summary>
     public void FreezeFinalize(Stroke stroke, bool pressureEnabled)
     {
-        var points = stroke.StylusPoints;
-        double px = points.Count > 0 ? points[^1].X : double.NaN;
-        double py = points.Count > 0 ? points[^1].Y : double.NaN;
-
-        int deviceId = MatchSessionByStroke(stroke);
-        int sessionCount = 0;
-        int liftedCount = 0;
+        int deviceId = -1;
         lock (_sync)
         {
-            sessionCount = _sessions.Count;
-            foreach (var countPair in _sessions)
-            {
-                if (countPair.Value.UpElapsedMs > 0)
-                    liftedCount++;
-            }
-
-            // 兜底会话门槛：已抬笔 + 末点距离 ≤120px（锁内局部函数，px/py 为笔画末点）
-            bool CloseEnough(DeviceSession s)
-            {
-                if (s.UpElapsedMs <= 0 || s.Samples.Count == 0 || double.IsNaN(px))
-                    return false;
-                var last = s.Samples[^1];
-                return Dist(px, py, last.X, last.Y) <= FallbackSessionDistance;
-            }
-
-            if (deviceId == -1 && _selfDrawAllDevices)
+            if (_selfDrawAllDevices)
             {
                 double latestUp = -1;
                 foreach (var pair in _sessions)
                 {
                     if (!_stylusTablets.TryGetValue(pair.Value.TabletDeviceId, out bool isStylus) || !isStylus)
                         continue;   // 触摸设备的笔画由叠加层自绘提交，不走这里
-                    if (CloseEnough(pair.Value) && pair.Value.UpElapsedMs > latestUp)
+                    if (pair.Value.UpElapsedMs > latestUp)
                     {
                         latestUp = pair.Value.UpElapsedMs;
                         deviceId = pair.Key;
                     }
                 }
             }
-            if (deviceId == -1 && _primaryDeviceId != -1
-                && _sessions.TryGetValue(_primaryDeviceId, out var primarySession) && CloseEnough(primarySession))
+            if (deviceId == -1 && _primaryDeviceId != -1 && _sessions.ContainsKey(_primaryDeviceId))
             {
                 deviceId = _primaryDeviceId;
             }
             else if (deviceId == -1 && _sessions.Count == 1)
             {
-                foreach (var pair in _sessions)
-                {
-                    if (CloseEnough(pair.Value))
-                        deviceId = pair.Key;
-                }
+                foreach (int id in _sessions.Keys)
+                    deviceId = id;
             }
             else if (deviceId == -1 && _sessions.Count > 1)
             {
                 double latestUp = -1;
                 foreach (var pair in _sessions)
                 {
-                    if (CloseEnough(pair.Value) && pair.Value.UpElapsedMs > latestUp)
+                    if (pair.Value.UpElapsedMs > latestUp)
                     {
                         latestUp = pair.Value.UpElapsedMs;
                         deviceId = pair.Key;
@@ -894,12 +815,7 @@ public sealed class TimePressureController
             }
         }
         if (deviceId == -1)
-        {
-            // 有会话却匹配不上才是异常（无会话 = 未采集/已清场，属正常路径不打日志）；仅异常分支输出
-            if (sessionCount > 0)
-                ConsoleLog.Write("多指书写", $"定格无有效会话: 笔画点={points.Count} 会话数={sessionCount} 已抬笔={liftedCount}");
             return;
-        }
         FreezeFinalize(deviceId, stroke, pressureEnabled);
     }
 
@@ -926,9 +842,6 @@ public sealed class TimePressureController
 
         var stylusPoints = stroke.StylusPoints;
         int count = stylusPoints.Count;
-        // 诊断已暂停（需要取证时取消本行注释）
-        // TimePenDiagnostics.Native(deviceId, stroke);   // 取证：原生笔画点列
-
         // 未采到任何样本（例如武装状态晚于落笔生效）：不改写压力，保持原样，避免把整条笔画压成针尖细线
         if (snapshot is { Count: > 0 } && count > 0)
         {
@@ -998,11 +911,6 @@ public sealed class TimePressureController
             OnUi(() => _overlay.RemoveSessionLayer(deviceId));
         if (empty)
             OnUi(UnhookRendering);
-        if (removed)
-        {
-            // 诊断已暂停（需要取证时取消本行注释）
-            // TimePenDiagnostics.Flush();   // 取证写盘（每笔一次）
-        }
         if (removed)
             OnUi(() => SessionEnded?.Invoke(deviceId));   // 宿主据此移除同设备残留的预览视觉（僵尸笔兜底）
     }

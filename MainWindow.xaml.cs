@@ -507,8 +507,8 @@ public partial class MainWindow : Window
 
     /// <summary>更新完成后首次启动：首次使用（设置文件不存在）不弹直接记为已展示；
     /// 其余情况当前版本与已展示日志版本不同且存在对应 Release 时，
-    /// 拉取正文（Markdown）用 iuwm ContentDialog + MdXaml 展示并记为已展示；
-    /// 无匹配 Release（Dev 版）/网络失败静默记日志。</summary>
+    /// 拉取正文（Markdown）用 iuwm ContentDialog + Sage.MarkdownRenderer 展示并记为已展示；
+    /// WebView2 不可用时回退纯文本；无匹配 Release（Dev 版）/网络失败静默记日志。</summary>
     private async Task ShowChangelogAfterUpdateAsync(Models.AppSettings s)
     {
         var current = UpdateService.CurrentVersion;
@@ -532,21 +532,30 @@ public partial class MainWindow : Window
                 return;   // 当前版本无对应 Release：不弹
             }
             ConsoleLog.Write("应用更新", $"更新日志: 弹出, 版本={current}");
-            // MarkdownScrollViewer 自带滚动，直接作为弹窗内容
-            var body = new MdXaml.MarkdownScrollViewer
+            var text = string.IsNullOrWhiteSpace(notes) ? "当前版本只有滚木日志😁" : notes.Trim();
+            object content;
+            ChangelogMarkdownView? view = null;
+            try
             {
-                Markdown = string.IsNullOrWhiteSpace(notes) ? "当前版本只有滚木日志😁" : notes.Trim(),
-                MaxHeight = 420,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            };
-            body.SetResourceReference(MdXaml.MarkdownScrollViewer.ForegroundProperty, "ToolbarForegroundBrush");
+                view = await ChangelogMarkdownView.CreateAsync(480, 420);
+                await view.ShowMarkdownAsync(text);
+                content = view.Host;
+            }
+            catch (Exception ex)
+            {
+                App.Log("Update.MarkdownView", ex);
+                content = ChangelogMarkdownView.CreatePlainTextFallback(
+                    text + "\n\n（Markdown 渲染不可用，已回退纯文本）");
+            }
             var dialog = new iNKORE.UI.WPF.Modern.Controls.ContentDialog
             {
                 Title = $"更新日志（v{current}）",
-                Content = body,
+                Content = content,
                 CloseButtonText = "关闭",
                 Owner = this,
             };
+            if (view != null)
+                dialog.Closed += (_, _) => view.Dispose();
             // 关闭按钮用强调样式（与设置页「查看更新日志」弹窗一致）
             dialog.SetResourceReference(iNKORE.UI.WPF.Modern.Controls.ContentDialog.CloseButtonStyleProperty,
                 iNKORE.UI.WPF.Modern.ThemeKeys.AccentButtonStyleKey);
@@ -1083,8 +1092,6 @@ public partial class MainWindow : Window
             _suppressedEditingBindings[canvas] = binding.ParentBinding;
             BindingOperations.ClearBinding(canvas, modeProperty);
             canvas.EditingMode = InkCanvasEditingMode.None;
-            if (_viewModel.InkTool.ActiveTool == InkToolMode.Eraser)
-                canvas.EraserShape = new EllipseStylusShape(0.01, 0.01);   // 手势期间橡皮物理失效：在途擦除立即失去命中面积
             // 第 1 指落下时 InkCanvas 已开始一笔；切 None 时 WPF 可能把它提交而不是丢弃 →
             // 手势结束后会残留一小截墨迹。这里把本次输入新增的笔画移除（CodeInput 门：不写撤销历史；
             // PageStrokes_StrokesChanged 的笔画级订阅/_strokePage 簿记仍随事件正常回收）。
@@ -1107,6 +1114,8 @@ public partial class MainWindow : Window
         }
         if (_viewModel.InkTool.ActiveTool != InkToolMode.Eraser)
             FlushEraserBatch();   // 手掌擦除批处理照旧落账；橡皮批处理手势期间只累积，结束时统一回滚
+        if (_viewModel.InkTool.ActiveTool == InkToolMode.Eraser)
+            SuppressEraserForGesture();   // 全部页画布橡皮物理失效（手势期间禁止任何路径恢复真实形状）
         _inkGestureSuppressed = true;
     }
 
@@ -1191,12 +1200,12 @@ public partial class MainWindow : Window
         foreach (var (canvas, binding) in _suppressedEditingBindings)
             BindingOperations.SetBinding(canvas, InkCanvas.EditingModeProperty, binding);   // 接回绑定即自动求值回当前工具
         _suppressedEditingBindings.Clear();
+        _inkGestureSuppressed = false;   // 先解除抑制，UpdateEraserShapes 才能恢复真实橡皮形状
         if (_viewModel.InkTool.ActiveTool == InkToolMode.Eraser)
         {
             RevertEraserBatchForGesture();   // 兜底：回滚手势期间累积的全部擦除（不入撤销历史）
             UpdateEraserShapes();            // 恢复真实橡皮形状（按当前面积擦/墨迹擦模式）
         }
-        _inkGestureSuppressed = false;
     }
 
     /// <summary>Ctrl + 滚轮缩放：以鼠标指针位置为锚点，同步布局后补偿偏移，避免异步补偿造成的闪烁。</summary>
@@ -1601,7 +1610,24 @@ public partial class MainWindow : Window
     }
 
     private void UpdateEraserShapes()
-        => ApplyEraserShapeForMode(_viewModel.InkTool.IsStrokeEraser);
+    {
+        // 双指手势期间缩放会改 DisplayScale → 本方法被反复触发；必须保持 0.01 失效态，
+        // 否则擦除洞恢复真实尺寸 → 双指缩放全程擦除（抬手后才被回滚）
+        if (_inkGestureSuppressed && _viewModel.InkTool.ActiveTool == InkToolMode.Eraser)
+        {
+            SuppressEraserForGesture();
+            return;
+        }
+        ApplyEraserShapeForMode(_viewModel.InkTool.IsStrokeEraser);
+    }
+
+    /// <summary>双指手势期间橡皮物理失效（WPF 在途擦除打不断，只能把形状换成 0.01 微型椭圆）。
+    /// 手势结束前禁止任何路径把真实形状写回。</summary>
+    private void SuppressEraserForGesture()
+    {
+        foreach (var canvas in _pageInkCanvases)
+            canvas.EraserShape = new EllipseStylusShape(0.01, 0.01);
+    }
 
     /// <summary>更新页面画布光标（消除"小一圈"）：WPF 内置光标不乘祖先的整层 ScaleTransform
     /// （dotnet/wpf EditBehavior.GetElementTransformMatrix 只读 InkCanvas 自身变换），DisplayScale≠1 时
@@ -1956,6 +1982,9 @@ public partial class MainWindow : Window
         if (_palmEraseCanvases.Contains(inkCanvas))
             return;
 
+        if (_inkGestureSuppressed)
+            return;   // 双指手势期间保持 0.01 失效橡皮，禁止重设回真实形状
+
         if (_viewModel.InkTool.ActiveTool == InkToolMode.Eraser && !_viewModel.InkTool.IsStrokeEraser)
         {
             // 与 UpdateEraserShapes 同款补偿：页面坐标 ÷ DisplayScale，屏幕擦除洞恒为 EraserSize
@@ -2017,7 +2046,9 @@ public partial class MainWindow : Window
         if (sender is not InkCanvas inkCanvas || inkCanvas.DataContext is not PageModel)
             return;
 
-        FlushEraserBatch();
+        // 双指手势期间橡皮批处理只累积（结束时统一回滚）；中途提交会让手势末尾无批次可回补
+        if (!(_inkGestureSuppressed && _viewModel.InkTool.ActiveTool == InkToolMode.Eraser))
+            FlushEraserBatch();
     }
 
     /// <summary>面积擦抬手（触摸/手写笔）：画板 Main_Grid_TouchUp 等价——提升的 MouseUp 时机不可靠，
@@ -2213,6 +2244,16 @@ public partial class MainWindow : Window
     {
         try
         {
+            // 菜单/缩略图状态回读：先复位防继承上一文档，再按键覆盖（无库文档 viewState 为空 → 全走复位值）
+            _viewModel.IsThumbnailPanelVisible = false;
+            if (data.ViewState.TryGetValue("pdf_thumbnail_open", out var thumbStr) && thumbStr == "1")
+            {
+                ThumbnailPanelHost?.UpdateLayout();   // 动画前布局预热（防 ActualWidth=0 滑入静默无操作）
+                _viewModel.IsThumbnailPanelVisible = true;
+            }
+            InkBar.ApplyShapePinned(data.ViewState.TryGetValue("pdf_shape_pinned", out var pinStr) && pinStr == "1");
+            InkBar.RestoreMenuControlsFromVm();   // 墨迹菜单 UI 回填（页签/滑块/多指/亮暗系，VM 已由 ApplyDocumentMenuState 装入）
+
             var prev = _currentCommitType;
             _currentCommitType = CommitReason.CodeInput;   // 回放门：恢复不记入撤销历史
             try
@@ -2252,6 +2293,7 @@ public partial class MainWindow : Window
             finally { _currentCommitType = prev; }
 
             Board.LoadPersistedBoard(data.BoardSlots, data.ViewState);
+            Board.ApplyDocumentMenuState(data.ViewState);   // 画板菜单记忆回读（调色盘/手势/图形置顶）
         }
         catch (Exception ex)
         {
@@ -2273,8 +2315,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        // ① 显示位置（ZoomLevel / 滚动偏移 / 当前页 / 画板页签）
+        // ① 显示位置（ZoomLevel / 滚动偏移 / 当前页 / 画板页签）+ 菜单记忆（整表替换：必须全量写，
+        //    漏键会被 DELETE 清掉；被迁字段已 JsonIgnore 不入 Settings.json）
         var (bc, bt) = Board.GetBoardPageState();
+        var s = _viewModel.Settings;
+        var bs = BoardView.Settings;
         store.SaveViewState(new Dictionary<string, string>
         {
             ["pdf_zoom"] = _viewModel.ZoomLevel.ToString(CultureInfo.InvariantCulture),
@@ -2282,6 +2327,32 @@ public partial class MainWindow : Window
             ["pdf_page"] = _viewModel.CurrentPage.ToString(CultureInfo.InvariantCulture),
             ["board_current"] = bc.ToString(CultureInfo.InvariantCulture),
             ["board_total"] = bt.ToString(CultureInfo.InvariantCulture),
+            // ── PDF 侧调色盘/橡皮菜单记忆 ──
+            ["pdf_ink_type"] = s.InkType.ToString(CultureInfo.InvariantCulture),
+            ["pdf_pen_color"] = s.PenColor.ToString(CultureInfo.InvariantCulture),
+            ["pdf_pen_width"] = s.PenWidth.ToString(CultureInfo.InvariantCulture),
+            ["pdf_hl_color"] = s.HighlighterColor.ToString(CultureInfo.InvariantCulture),
+            ["pdf_hl_width"] = s.HighlighterWidth.ToString(CultureInfo.InvariantCulture),
+            ["pdf_ink_alpha"] = s.InkAlpha.ToString(CultureInfo.InvariantCulture),
+            ["pdf_palette_light"] = s.UseLightThemeColor ? "1" : "0",
+            ["pdf_multi_finger"] = s.IsMultiFingerInkEnabled ? "1" : "0",
+            ["pdf_eraser_size"] = s.EraserSizeSetting.ToString(CultureInfo.InvariantCulture),
+            ["pdf_eraser_bystroke"] = s.EraserModeByStrokeSetting ? "1" : "0",
+            ["pdf_shape_pinned"] = InkBar.ShapePanelPinned ? "1" : "0",
+            ["pdf_thumbnail_open"] = _viewModel.IsThumbnailPanelVisible ? "1" : "0",
+            // ── 画板调色盘/手势菜单记忆 ──
+            ["board_pen_kind"] = bs.Canvas.LastPenKind.ToString(CultureInfo.InvariantCulture),
+            ["board_pen_color"] = bs.Canvas.PenColor.ToString(CultureInfo.InvariantCulture),
+            ["board_pen_width"] = bs.Canvas.PenWidth.ToString(CultureInfo.InvariantCulture),
+            ["board_hl_color"] = bs.Canvas.HighlighterColor.ToString(CultureInfo.InvariantCulture),
+            ["board_hl_width"] = bs.Canvas.HighlighterWidth.ToString(CultureInfo.InvariantCulture),
+            ["board_ink_width"] = bs.Canvas.InkWidth.ToString(CultureInfo.InvariantCulture),
+            ["board_ink_alpha"] = bs.Canvas.InkAlpha.ToString(CultureInfo.InvariantCulture),
+            ["board_gesture_multi"] = bs.Gesture.IsEnableMultiTouchMode ? "1" : "0",
+            ["board_gesture_zoom"] = bs.Gesture.IsEnableTwoFingerZoom ? "1" : "0",
+            ["board_gesture_pan"] = bs.Gesture.IsEnableTwoFingerTranslate ? "1" : "0",
+            ["board_gesture_rotate"] = bs.Gesture.IsEnableTwoFingerRotation ? "1" : "0",
+            ["board_shape_pinned"] = Board.ShapePanelPinned ? "1" : "0",
         });
         store.TrimBoardSlots(bt);   // 清陈旧槽位（任务链排在 SaveViewState 之后，D9）
 

@@ -24,6 +24,7 @@ public partial class MainWindow : Window
     private Point shapeIniP = new Point(0, 0);
     private bool shapeIsMouseDown;
     private bool _shapeFinishing;   // 抬笔完成流程进行中（含同步弹窗泵）：屏蔽绘制帧，防泵内 MouseMove 画幽灵帧删曲线/劫持 special
+    private bool _shapeFinishPending;   // 收尾已排队到 Background（避免在输入事件内同步泵弹窗）
     private bool shapeIsWaitUntilNextTouchDown;
     private Stroke shapeLastTempStroke = null!;
     private StrokeCollection shapeLastTempStrokeCollection = null!;
@@ -86,7 +87,7 @@ public partial class MainWindow : Window
         if (ShapeDrawMode == 0) return;   // 非形状模式的画布 mouse-up 不得触碰捕获与形状临时状态
         if (sender is not InkCanvas canvas) return;
         canvas.ReleaseMouseCapture();
-        ShapeDrawingMouseUp(canvas);
+        ScheduleShapeFinish(canvas);
     }
 
     // ICA MW_TouchEvents.cs Main_Grid_TouchDown 形状相关段（NeedUpdateIniP / 长方体第二笔首帧预览）
@@ -142,11 +143,13 @@ public partial class MainWindow : Window
     {
         if (sender is not InkCanvas canvas) return;
         shapeTouchIds.Remove(e.TouchDevice.Id);
-        ShapeDrawingMouseUp(canvas);
         if (shapeTouchIds.Count == 0)
         {
             shapeIsWaitUntilNextTouchDown = false;
         }
+        if (ShapeDrawMode == 0) return;
+        canvas.ReleaseMouseCapture();
+        ScheduleShapeFinish(canvas);
     }
 
     // ═══ 抬笔定型（ICA MW_ShapeDrawing.cs:1487-1633 形状部分；PDF 渐近线弹窗为 iuwm ContentDialog 同步泵，见 AskKeepAsymptote）═══
@@ -169,6 +172,7 @@ public partial class MainWindow : Window
             };
             dialog.SetResourceReference(iNKORE.UI.WPF.Modern.Controls.ContentDialog.PrimaryButtonStyleProperty,
                 iNKORE.UI.WPF.Modern.ThemeKeys.AccentButtonStyleKey);
+            try { Mouse.Capture(null); } catch { }   // 捕获挂在画布上时弹窗 Popup 收不到点击
             var task = dialog.ShowAsync();
             if (!task.IsCompleted)
             {
@@ -191,6 +195,23 @@ public partial class MainWindow : Window
     /// 画板侧 SelectShape 已有同款）。防止上一次只画了第一笔就中止导致 step 残留 1、
     /// 下一次第一笔抬笔被误判为完成分支。</summary>
     internal void ResetHyperbolaStep() => shapeMultiStepShapeCurrentStep = 0;
+
+    /// <summary>把收尾延后到输入路由结束之后：收尾可能弹 iuwm ContentDialog 并同步泵消息，
+    /// 在触摸/鼠标事件内泵会把本次输入的提升与捕获释放堵在当前栈里 → 弹窗按钮长期点不动。
+    /// Background 优先级低于 Input：等触摸路由、提升、LostCapture 全部走完再收尾。</summary>
+    private void ScheduleShapeFinish(InkCanvas canvas)
+    {
+        if (_shapeFinishPending) return;
+        _shapeFinishPending = true;
+        shapeIsMouseDown = false;   // 立即停掉预览帧
+        _shapeFinishing = true;     // 延迟窗口内屏蔽新输入的幽灵帧（ShapeDrawingMouseUp 的 finally 会复位）
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+        {
+            if (!_shapeFinishPending) return;
+            _shapeFinishPending = false;
+            ShapeDrawingMouseUp(canvas);
+        }));
+    }
 
     private void ShapeDrawingMouseUp(InkCanvas canvas)
     {

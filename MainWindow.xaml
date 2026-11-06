@@ -9,7 +9,7 @@
         xmlns:board="clr-namespace:InkCanvasForPDF.Board"
         xmlns:conv="clr-namespace:InkCanvasForPDF.Converters"
         Title="{Binding WindowTitle}"
-        Width="1100" Height="760"
+        Width="1000" Height="650"
         WindowState="Maximized"
         WindowStartupLocation="CenterScreen"
         Icon="Resources/app.ico"
@@ -59,7 +59,7 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="MenuItem">
-                        <Grid SnapsToDevicePixels="True">
+                        <Grid Height="40" SnapsToDevicePixels="True">
                             <Border x:Name="Bd" Margin="1" Padding="8,5" CornerRadius="6"
                                     Background="Transparent">
                                 <ContentPresenter ContentSource="Header" RecognizesAccessKey="True"/>
@@ -184,7 +184,7 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <!-- ═══ 顶部工具栏（打开 PDF 且未打开设置时显示）═══ -->
+        <!-- ═══ 顶部工具栏（打开 PDF 且非打开加载中时显示；设置/画板覆盖层滑入期间保持显示，由覆盖层遮盖）═══ -->
         <Border Grid.Row="0" Background="{DynamicResource ToolbarBackgroundBrush}" BorderBrush="{DynamicResource ToolbarBorderBrush}" BorderThickness="0,0,0,1" Padding="8,6"
                 Visibility="{Binding IsToolbarVisible, Converter={StaticResource BoolToVisibility}}">
             <Grid>
@@ -536,7 +536,7 @@
         </Grid>
 
         <!-- 设置覆盖层：外层 Grid 跨 Row0+Row1（含顶栏区域），ZIndex 低于画板(50)高于内容/墨迹栏(10)，
-             退出时顶栏在面板下方恢复，不会把滑出面板"挤"到工具栏下 -->
+             顶栏始终位于面板下方（不随设置开关隐藏），滑入/滑出均由面板逐渐遮盖/露出顶栏 -->
         <ink:SettingsView x:Name="SettingsView" Grid.Row="0" Grid.RowSpan="2" Panel.ZIndex="40"
                           DataContext="{Binding}"
                           Visibility="Collapsed"/>

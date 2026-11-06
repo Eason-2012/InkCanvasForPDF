@@ -4,10 +4,10 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media;
+using System.Text.Json.Nodes;
 using InkCanvasForPDF.Services;
 using InkCanvasForPDF.ViewModels;
 using iNKORE.UI.WPF.Modern.Controls;
-using Newtonsoft.Json.Linq;
 using FIcon = FluentIcons.Common.Icon;
 
 namespace InkCanvasForPDF.Controls;
@@ -281,23 +281,31 @@ public partial class SettingsView : System.Windows.Controls.UserControl
     /// <summary>读取编译进程序集的第三方依赖清单，按显示名排序；缺资源/解析失败记日志并返回空表。</summary>
     private static List<(string Name, string Url)> LoadDependencyInfos()
     {
+        // 取首个存在的字符串字段（JSON null 视同缺失继续找下一个）
+        static string? Pick(JsonObject o, params string[] keys)
+        {
+            foreach (var k in keys)
+                if (o[k] is JsonValue v && v.TryGetValue(out string? s))
+                    return s;
+            return null;
+        }
+
         try
         {
             var uri = new Uri("pack://application:,,,/Resources/dependencies.g.json");
             using var stream = Application.GetResourceStream(uri)!.Stream;
             using var reader = new StreamReader(stream);
-            var arr = JArray.Parse(reader.ReadToEnd());
+            if (JsonNode.Parse(reader.ReadToEnd()) is not JsonArray arr)
+                return new List<(string Name, string Url)>();
 
             var list = new List<(string Name, string Url)>();
-            foreach (var token in arr)
+            foreach (var token in arr.OfType<JsonObject>())
             {
-                var name = (string?)token["RepositoryId"] ?? (string?)token["PackageId"];
+                var name = Pick(token, "RepositoryId", "PackageId");
                 if (string.IsNullOrWhiteSpace(name))
                     continue;
-                var url = (string?)token["RepositoryProjectUrl"]
-                          ?? (string?)token["PackageProjectUrl"]
-                          ?? (string?)token["LicenseUrl"] ?? "";
-                list.Add((name!, url));
+                var url = Pick(token, "RepositoryProjectUrl", "PackageProjectUrl", "LicenseUrl") ?? "";
+                list.Add((name, url));
             }
             return list.OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase).ToList();
         }
@@ -876,24 +884,18 @@ public partial class SettingsView : System.Windows.Controls.UserControl
         ApplyUpdateState();
     }
 
-    /// <summary>查看更新日志：取当前版本 Release 正文（Markdown），iuwm ContentDialog 用 MdXaml 渲染展示。</summary>
+    /// <summary>查看更新日志：取当前版本 Release 正文（Markdown），iuwm ContentDialog 用 Sage.MarkdownRenderer 渲染展示；
+    /// WebView2 不可用时回退纯文本。</summary>
     private async void ViewChangelog_Click(object sender, RoutedEventArgs e)
     {
         if (Vm is not { } vm)
             return;
 
-        // MarkdownScrollViewer 自带滚动，直接作为弹窗内容
-        var body = new MdXaml.MarkdownScrollViewer
-        {
-            Markdown = "正在获取更新日志…",
-            MaxHeight = 420,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-        };
-        body.SetResourceReference(MdXaml.MarkdownScrollViewer.ForegroundProperty, "ToolbarForegroundBrush");
+        var loading = new TextBlock { Text = "正在获取更新日志…", Margin = new Thickness(8) };
         var dialog = new ContentDialog
         {
             Title = "更新日志",
-            Content = body,
+            Content = loading,
             CloseButtonText = "关闭",
             Owner = Window.GetWindow(this) ?? Application.Current.MainWindow,
         };
@@ -905,14 +907,29 @@ public partial class SettingsView : System.Windows.Controls.UserControl
         try
         {
             var notes = await UpdateService.GetReleaseNotesAsync(vm.Settings, UpdateService.CurrentVersion);
-            body.Markdown = notes == null || string.IsNullOrWhiteSpace(notes)
+            var text = notes == null || string.IsNullOrWhiteSpace(notes)
                 ? "当前版本只有滚木日志😁"
                 : notes.Trim();
+
+            try
+            {
+                var view = await ChangelogMarkdownView.CreateAsync(480, 420);
+                dialog.Closed += (_, _) => view.Dispose();
+                dialog.Content = view.Host;
+                await view.ShowMarkdownAsync(text);
+            }
+            catch (Exception ex)
+            {
+                App.Log("Update.MarkdownView", ex);
+                dialog.Content = ChangelogMarkdownView.CreatePlainTextFallback(
+                    text + "\n\n（Markdown 渲染不可用，已回退纯文本）");
+            }
         }
         catch (Exception ex)
         {
             App.Log("Update.GetReleaseNotes", ex);
-            body.Markdown = "获取更新日志失败：可能无法连接到 GitHub。";
+            dialog.Content = ChangelogMarkdownView.CreatePlainTextFallback(
+                "获取更新日志失败：可能无法连接到 GitHub。");
         }
     }
 }

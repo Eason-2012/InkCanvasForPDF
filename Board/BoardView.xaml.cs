@@ -1,6 +1,8 @@
 #nullable disable warnings
 
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -97,18 +99,7 @@ namespace InkCanvasForPDF.Board
             // 对齐 ICA Window_Loaded：先备画笔属性 → 读设置 → 放行 isLoaded 守卫的处理器
             loadPenCanvas();
             LoadSettings(true);
-            // 恢复手势开关（保存随 Toggled 已落盘；此处仅回读。isLoaded 尚为 false，Toggled 处理器 no-op）
-            ToggleSwitchEnableMultiTouchMode.IsOn = Settings.Gesture.IsEnableMultiTouchMode;
-            ToggleSwitchEnableTwoFingerZoom.IsOn = Settings.Gesture.IsEnableTwoFingerZoom;
-            ToggleSwitchEnableTwoFingerTranslate.IsOn = Settings.Gesture.IsEnableTwoFingerTranslate;
-            ToggleSwitchEnableTwoFingerRotation.IsOn = Settings.Gesture.IsEnableTwoFingerRotation;
-            // 粗细/不透明度滑块回读（ICA MW_SettingsToLoad.cs:398-401 同款；粗细滑块显示值 = InkWidth ×2）。
-            // isLoaded 尚为 false，ValueChanged 处理器 no-op，不会回写/落盘。
-            BoardInkWidthSlider.Value = Math.Clamp(Settings.Canvas.InkWidth * 2, 1, 30);
-            BoardInkAlphaSlider.Value = Math.Clamp(Settings.Canvas.InkAlpha, 20, 240);
-            // 墨迹菜单初始页签：恢复上次启用的硬笔/软笔（荧光笔不记录；isLoaded 前 SelectionChanged 处理器 no-op）
-            boardInkType = Math.Clamp(Settings.Canvas.LastPenKind, 0, 1);
-            BoardPivotInk.SelectedIndex = boardInkType;
+            RestoreMenuControlsFromSettings();   // 手势开关/页签/滑块回读（isLoaded 尚为 false，各处理器 no-op 不回写）
             isLoaded = true;
             // 多指书写运行时接线（事件订阅 + isInMultiTouchMode）按保存值重建；
             // !isInMultiTouchMode 幂等守卫：防回填/其它路径已启用后被翻转语义重复 toggle 关掉
@@ -118,6 +109,91 @@ namespace InkCanvasForPDF.Board
 
             InitBoardCore();   // MW_BoardCore：撤销/重做状态订阅 + 笔画历史跟踪
             InitializePauseInkToShape();   // MW_InkToShape：停顿强制识别追踪器挂到 inkCanvas（配置由 MainWindow 推送）
+        }
+
+        /// <summary>把画板墨迹/手势菜单控件回填到 Settings 当前值（手势 4 开关、墨迹页签、粗细/不透明度滑块）。
+        /// Loaded 初次恢复与文档打开回读（ApplyDocumentMenuState）共用：先赋 boardInkType 再落 SelectedIndex，
+        /// 让 BoardPivotInk_SelectionChanged 同值早退，防 SaveActiveColorToStore 用运行时颜色回写冲掉刚装入的记忆。</summary>
+        private void RestoreMenuControlsFromSettings()
+        {
+            // 手势开关回读（Toggled 处理器 isLoaded 守卫；值未变不触发事件，不回写不落盘）
+            ToggleSwitchEnableMultiTouchMode.IsOn = Settings.Gesture.IsEnableMultiTouchMode;
+            ToggleSwitchEnableTwoFingerZoom.IsOn = Settings.Gesture.IsEnableTwoFingerZoom;
+            ToggleSwitchEnableTwoFingerTranslate.IsOn = Settings.Gesture.IsEnableTwoFingerTranslate;
+            ToggleSwitchEnableTwoFingerRotation.IsOn = Settings.Gesture.IsEnableTwoFingerRotation;
+            // 墨迹菜单页签：恢复上次启用的画笔类型（0=硬笔 1=软笔 2=荧光笔，含荧光笔）
+            boardInkType = Math.Clamp(Settings.Canvas.LastPenKind, 0, 2);
+            BoardPivotInk.SelectedIndex = boardInkType;
+            // 粗细/不透明度滑块回读（ICA MW_SettingsToLoad.cs:398-401 同款；粗细滑块显示值 = InkWidth ×2）
+            SyncBoardInkControls();
+        }
+
+        /// <summary>文档打开时回读画板菜单记忆（per-PDF 墨迹库 view_state）：先把迁移字段重置为代码默认
+        /// （防继承上一个 PDF），再逐键覆盖到共享 Settings 实例（被迁字段已 JsonIgnore，不回写 Settings.json），
+        /// 最后回填菜单控件与图形置顶字形。无库文档 viewState 为空 → 全走代码默认。</summary>
+        internal void ApplyDocumentMenuState(IReadOnlyDictionary<string, string> viewState)
+        {
+            var def = new Settings();
+            Settings.Canvas.LastPenKind = def.Canvas.LastPenKind;
+            Settings.Canvas.PenColor = def.Canvas.PenColor;
+            Settings.Canvas.PenWidth = def.Canvas.PenWidth;
+            Settings.Canvas.HighlighterColor = def.Canvas.HighlighterColor;
+            Settings.Canvas.HighlighterWidth = def.Canvas.HighlighterWidth;
+            Settings.Canvas.InkWidth = def.Canvas.InkWidth;
+            Settings.Canvas.InkAlpha = def.Canvas.InkAlpha;
+            Settings.Gesture.IsEnableMultiTouchMode = def.Gesture.IsEnableMultiTouchMode;
+            Settings.Gesture.IsEnableTwoFingerZoom = def.Gesture.IsEnableTwoFingerZoom;
+            Settings.Gesture.IsEnableTwoFingerTranslate = def.Gesture.IsEnableTwoFingerTranslate;
+            Settings.Gesture.IsEnableTwoFingerRotation = def.Gesture.IsEnableTwoFingerRotation;
+
+            if (viewState.TryGetValue("board_pen_kind", out var k1)
+                && int.TryParse(k1, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v1))
+                Settings.Canvas.LastPenKind = Math.Clamp(v1, 0, 2);
+            if (viewState.TryGetValue("board_pen_color", out var k2)
+                && int.TryParse(k2, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v2))
+                Settings.Canvas.PenColor = v2;
+            if (viewState.TryGetValue("board_pen_width", out var k3)
+                && double.TryParse(k3, NumberStyles.Float, CultureInfo.InvariantCulture, out var v3))
+                Settings.Canvas.PenWidth = v3;
+            if (viewState.TryGetValue("board_hl_color", out var k4)
+                && int.TryParse(k4, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v4))
+                Settings.Canvas.HighlighterColor = v4;
+            if (viewState.TryGetValue("board_hl_width", out var k5)
+                && double.TryParse(k5, NumberStyles.Float, CultureInfo.InvariantCulture, out var v5))
+                Settings.Canvas.HighlighterWidth = v5;
+            if (viewState.TryGetValue("board_ink_width", out var k6)
+                && double.TryParse(k6, NumberStyles.Float, CultureInfo.InvariantCulture, out var v6))
+                Settings.Canvas.InkWidth = v6;
+            if (viewState.TryGetValue("board_ink_alpha", out var k7)
+                && int.TryParse(k7, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v7))
+                Settings.Canvas.InkAlpha = v7;
+            if (viewState.TryGetValue("board_gesture_multi", out var k8))
+                Settings.Gesture.IsEnableMultiTouchMode = k8 == "1";
+            if (viewState.TryGetValue("board_gesture_zoom", out var k9))
+                Settings.Gesture.IsEnableTwoFingerZoom = k9 == "1";
+            if (viewState.TryGetValue("board_gesture_pan", out var k10))
+                Settings.Gesture.IsEnableTwoFingerTranslate = k10 == "1";
+            if (viewState.TryGetValue("board_gesture_rotate", out var k11))
+                Settings.Gesture.IsEnableTwoFingerRotation = k11 == "1";
+
+            // 图形菜单置顶：字段 + 图钉字形（E718=固定 / E77A=自动隐藏）
+            _shapePanelPinned = viewState.TryGetValue("board_shape_pinned", out var kp) && kp == "1";
+            BoardBorderDrawShapePin.Glyph = _shapePanelPinned ? "\uE718" : "\uE77a";
+
+            if (!isLoaded) return;   // Loaded 之前的初次恢复由构造流程负责
+            RestoreMenuControlsFromSettings();
+            // 多指书写运行时接线按当前值对齐（幂等守卫；开关值变化时 Toggled 处理器也会自行接线）
+            if (Settings.Gesture.IsEnableMultiTouchMode && !isInMultiTouchMode)
+                BorderMultiTouchMode_MouseUp(null, null);
+            CheckEnableTwoFingerGestureBtnColorPrompt();
+
+            // 切文档时仍停在画板中：即时刷新当前活动笔与菜单滑块（否则交给 EnterBoard 的恢复链）
+            if (currentMode == 1)
+            {
+                ApplyBoardInkType(Math.Clamp(Settings.Canvas.LastPenKind, 0, 2));
+                SyncBoardInkControls();
+                CheckColorTheme();
+            }
         }
 
         /// <summary>窗口失去焦点时关闭画板墨迹菜单、手势菜单、图形菜单与橡皮菜单（MainWindow.Deactivated 调用；
@@ -250,9 +326,10 @@ namespace InkCanvasForPDF.Board
             Helpers.AnimationsHelper.ShowWithSlideFromBottomAndFade(BlackboardRightSide);
 
             RestoreStrokes();      // 还原本槽位上次退出时保存的墨迹
-            // 恢复上次启用的硬笔/软笔及其粗细（荧光笔不记录）；颜色按画布：黑底白笔、白底黑笔；
+            // 恢复上次启用的画笔类型（含荧光笔）、粗细与记忆色（同 PDF 打开恢复；仅记忆色非法/与画布同色时黑白兜底）；
             // 压感随硬/软笔联动（复用现有 ColorSwitchCheck/CheckColorTheme 刷新，逻辑保留）
-            ApplyBoardInkType(Math.Clamp(Settings.Canvas.LastPenKind, 0, 1), canvasColorOverride: true);
+            ApplyBoardInkType(Math.Clamp(Settings.Canvas.LastPenKind, 0, 2));
+            BoardPivotInk.SelectedIndex = boardInkType;   // 菜单页签跟随恢复类型（同值早退，幂等）
             ColorSwitchCheck();    // 内含 EditingMode=Ink + CheckColorTheme + HideSubPanels("color")
             HideSubPanels("pen", true);
 
