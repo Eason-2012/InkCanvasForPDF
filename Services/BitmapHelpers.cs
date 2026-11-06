@@ -4,7 +4,8 @@ namespace InkCanvasForPDF.Services;
 /// 纯函数：仅处理 BGRA 像素缓冲，不涉及窗口状态。</summary>
 internal static class BitmapHelpers
 {
-    /// <summary>BGRA 位图顺时针旋转 by degrees（0/90/180/270）。随引擎抄入，当前未接线。</summary>
+    /// <summary>BGRA 位图顺时针旋转 by degrees（0/90/180/270）。用于页面/缩略图渲染后的像素级旋转
+    /// （方向与尺寸完全由调用方控制，不依赖 PDFium 的 rotate 参数）。</summary>
     internal static (byte[] bytes, int w, int h) RotateBitmap(byte[] src, int w, int h, int degrees)
     {
         degrees = ((degrees % 360) + 360) % 360;

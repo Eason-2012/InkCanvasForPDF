@@ -217,6 +217,11 @@
                                     <ic:FluentIcon Icon="DocumentAdd" IconVariant="Regular" FontSize="24"/>
                                 </MenuItem.Icon>
                             </MenuItem>
+                            <MenuItem Style="{StaticResource SubMenuItemStyle}" Header="打印 PDF" Click="PrintPdf_Click">
+                                <MenuItem.Icon>
+                                    <ic:FluentIcon Icon="Print" IconVariant="Regular" FontSize="24"/>
+                                </MenuItem.Icon>
+                            </MenuItem>
                             <MenuItem Style="{StaticResource SubMenuItemStyle}" Header="回到主页" Command="{Binding GoHomeCommand}">
                                 <MenuItem.Icon>
                                     <ic:FluentIcon Icon="Home" IconVariant="Regular" FontSize="24"/>
@@ -229,6 +234,12 @@
                             </MenuItem>
                         </MenuItem>
                     </Menu>
+                    <Button Style="{StaticResource IconButton}" Click="PrintPdf_Click" ToolTip="打印 PDF">
+                        <Grid Width="32" Height="32">
+                            <ic:FluentIcon Icon="Print" IconVariant="Regular" FontSize="24"
+                                           Foreground="{DynamicResource ToolbarForegroundBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+                    </Button>
                 </StackPanel>
 
                 <!-- 中：页码控件（- [页码输入框] / 总页数 +，常驻输入框可直接编辑跳页） -->
@@ -265,6 +276,20 @@
                     <Button Style="{StaticResource IconButton}" Click="ZoomInButton_Click" ToolTip="放大">
                         <Grid Width="32" Height="32">
                             <ic:FluentIcon Icon="Add" IconVariant="Regular" FontSize="24"
+                                           Foreground="{DynamicResource ToolbarForegroundBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+                    </Button>
+                    <Button Style="{StaticResource IconButton}" Click="RotateCounterClockwiseButton_Click" ToolTip="逆时针旋转"
+                            IsEnabled="{Binding HasPdf}">
+                        <Grid Width="32" Height="32">
+                            <ic:FluentIcon Icon="ArrowRotateCounterclockwise" IconVariant="Regular" FontSize="24"
+                                           Foreground="{DynamicResource ToolbarForegroundBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+                    </Button>
+                    <Button Style="{StaticResource IconButton}" Click="RotateClockwiseButton_Click" ToolTip="顺时针旋转"
+                            IsEnabled="{Binding HasPdf}">
+                        <Grid Width="32" Height="32">
+                            <ic:FluentIcon Icon="ArrowRotateClockwise" IconVariant="Regular" FontSize="24"
                                            Foreground="{DynamicResource ToolbarForegroundBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Grid>
                     </Button>
@@ -340,8 +365,9 @@
                                             </ControlTemplate>
                                         </Button.Template>
                                         <StackPanel>
-                                            <!-- Grid 两层：底层白底+图片（Clip 圆角由 SizeChanged 设置），覆盖层蓝框描边在图片之上（子元素会压住 Border 描边，故拆层保证 z 序） -->
-                                            <Grid>
+                                            <!-- 缩略图位图由渲染层按该页旋转角原生旋转，尺寸即显示槽位（Width/Height），无需视图旋转。
+                                                 Grid 两层：底层白底+图片（Clip 圆角由 SizeChanged 设置），覆盖层蓝框描边在图片之上（子元素会压住 Border 描边，故拆层保证 z 序） -->
+                                            <Grid Width="{Binding Width}" Height="{Binding Height}">
                                                 <Border Padding="0" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="6"
                                                         SizeChanged="ThumbnailFrame_SizeChanged">
                                                     <Image Source="{Binding Image}"
@@ -412,18 +438,25 @@
                                     <Border Margin="0,0,0,12" HorizontalAlignment="Center"
                                             Background="{DynamicResource CardBackgroundBrush}"
                                             BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1">
-                                        <!-- 叠加画布：Grid 内 Image 下层 + InkCanvas 上层（参考 PdfTeachAnnotator；
-                                             同尺寸同页面坐标，随整层 DisplayScale 缩放保持与位图对齐） -->
+                                        <!-- 外层 = 旋转后的显示槽位（参与布局/滚动前缀和）；PDF 位图由渲染层按该页旋转角原生旋转，
+                                             位图尺寸即槽位尺寸，不会再被裁掉两头。
+                                             墨迹层保持未旋转坐标系，用 RotateTransform 仅做显示旋转（内容尺寸旋转后的包围盒 = 槽位尺寸） -->
                                         <Grid Width="{Binding Width}" Height="{Binding Height}">
                                             <Image Source="{Binding Image}"
                                                    Width="{Binding Width}"
                                                    Height="{Binding Height}"
                                                    Stretch="None"
                                                    RenderOptions.BitmapScalingMode="{Binding DataContext.IsZooming, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource ZoomScalingMode}}"/>
+                                            <Grid Width="{Binding ContentWidth}" Height="{Binding ContentHeight}"
+                                                  HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                  RenderTransformOrigin="0.5,0.5">
+                                                <Grid.RenderTransform>
+                                                    <RotateTransform Angle="{Binding Rotation}"/>
+                                                </Grid.RenderTransform>
                                             <!-- PageInkCanvas = InkCanvas 子类：构造函数内替换为时间笔锋的自定义 DynamicRenderer（该属性为 protected，无法外部替换） -->
                                             <ink:PageInkCanvas Strokes="{Binding Strokes}"
-                                                       Width="{Binding Width}"
-                                                       Height="{Binding Height}"
+                                                       Width="{Binding ContentWidth}"
+                                                       Height="{Binding ContentHeight}"
                                                        Background="Transparent"
                                                        Cursor="Pen"
                                                        Focusable="False"
@@ -463,6 +496,7 @@
                                                 PreviewTouchDown="GridInkCanvasSelectionCover_PreviewTouchDown"
                                                 PreviewTouchUp="GridInkCanvasSelectionCover_PreviewTouchUp"
                                                 Visibility="Collapsed" />
+                                            </Grid>
                                         </Grid>
                                     </Border>
                                 </DataTemplate>

@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -60,6 +61,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     private int _openReadyElapsedMs;                 // 已轮询时长（超时兜底）
     private bool _isRebuildingPages;                 // ReloadPages 进行中：Pages 与 _pageTopDips 处于不一致中间态，抑制滚动驱动处理
     private double _widthFit = 1.0;                  // 宽度适配系数：页面槽位固定，宽度变化只更新此系数（整层等比缩放）
+    private readonly Dictionary<int, int> _pageRotations = new();   // 页索引 → 旋转角（0/90/180/270，仅非 0 记录；旋转只作用于当前页）
     private bool _zoomActive;                        // 缩放操作进行中（缩放引发的 ScrollChanged 不取消清晰）
     private bool _isZooming;                         // 缩放交互进行中：页面位图用 Linear 插值保证帧率
     private int _lastRangeFirst = -1;                // 上次可见范围（检测"有页退出视口"）
@@ -187,6 +189,9 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
 
     /// <summary>恢复文档显示滚动位置（offset + 页码回退），由 MainWindow 注入（Loaded 时机调用，内部 UpdateLayout）。</summary>
     public Action<double, int>? RequestRestoreScroll { get; set; }
+
+    /// <summary>浮动通知回调（消息 + 严重级别），由 MainWindow 注入 ShowFloatingTip。</summary>
+    public Action<string, iNKORE.UI.WPF.Modern.Controls.InfoBarSeverity>? ShowTip { get; set; }
 
     // ══ 墨迹持久化（D8：VM 只发事件，flush/恢复实现在 MainWindow）══
     /// <summary>当前文档的墨迹库（仅 UI 线程读写；打开后台块返回后赋值，关闭时随 DocumentClosing 置 null）。</summary>
@@ -388,6 +393,25 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         InkTool.LoadFromSettings(Settings);
     }
 
+    /// <summary>构建打印数据源（UI 线程）：读取每页物理点尺寸并换算为 96 DIP/inch，
+    /// 按当前页面旋转角给出显示尺寸。墨迹与渲染服务由返回值携带给打印对话框。</summary>
+    internal PrintDocumentSource CreatePrintSource()
+    {
+        int count = Math.Min(_pdf.PageCount, Pages.Count);
+        var list = new List<PrintPageInfo>(count);
+        for (int i = 0; i < count; i++)
+        {
+            var (pw, ph) = _pdf.GetPageSizePoints(i);
+            double cw = pw * 96.0 / 72.0;
+            double ch = ph * 96.0 / 72.0;
+            var page = Pages[i];
+            bool swap = page.Rotation is 90 or 270;
+            list.Add(new PrintPageInfo(i, page, cw, ch,
+                swap ? ch : cw, swap ? cw : ch, page.Rotation));
+        }
+        return new PrintDocumentSource(_pdf, list);
+    }
+
     private async void OpenPdf()
     {
         var dialog = new OpenFileDialog
@@ -402,7 +426,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>打开指定路径的 PDF（对话框选择与启动参数带入共用）。</summary>
-    internal async Task OpenPdfFile(string path)
+    internal async Task OpenPdfFile(string path, string? password = null)
     {
         IsOpeningPdf = true;   // 先显示加载页（不透明全屏，同时天然阻断再次点击）
         try
@@ -423,7 +447,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
             // + 墨迹库（算文件内容哈希、列目录判别、读三份数据——均非 UI 线程）
             var sizes = await Task.Run(() =>
             {
-                _pdf.OpenDocument(path);
+                _pdf.OpenDocument(path, password);
                 var pageSizes = new PageSize[_pdf.PageCount];
                 var thumbSizes = new PageSize[_pdf.PageCount];
                 for (int i = 0; i < _pdf.PageCount; i++)
@@ -437,7 +461,21 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
                 var pageInks = store?.LoadPages() ?? new Dictionary<int, byte[]>();
                 var boardSlots = store?.LoadBoardSlots() ?? new Dictionary<int, byte[]>();
                 var viewState = store?.LoadViewState() ?? new Dictionary<string, string>();
-                return (pageSizes, thumbSizes, store, pageInks, boardSlots, viewState);
+                // 逐页旋转态：键 pdf_rot_{0-based页索引}（忽略旧版全局 pdf_rotation）
+                var pageRotations = new Dictionary<int, int>();
+                foreach (var (key, value) in viewState)
+                {
+                    if (!key.StartsWith("pdf_rot_", StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    if (!int.TryParse(key["pdf_rot_".Length..], NumberStyles.Integer, CultureInfo.InvariantCulture, out var index))
+                        continue;
+                    if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var deg))
+                        continue;
+                    int rotation = NormalizeRotation(deg);
+                    if (index >= 0 && rotation != 0)
+                        pageRotations[index] = rotation;
+                }
+                return (pageSizes, thumbSizes, pageRotations, store, pageInks, boardSlots, viewState);
             });
 
             // 回 UI 线程：建集合 + 后续懒加载（InkStore 只在 UI 线程赋值/读取）
@@ -445,6 +483,9 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
             ApplyDocumentMenuState(sizes.viewState);   // 菜单记忆回读（先复位代码默认，再按键覆盖）
             PdfName = Path.GetFileNameWithoutExtension(path);
             HasPdf = true;
+            _pageRotations.Clear();   // 旋转态必须先于 ReloadPages 生效（槽位尺寸按各页旋转角交换）
+            foreach (var (index, rotation) in sizes.pageRotations)
+                _pageRotations[index] = rotation;
             await ReloadPages(sizes.pageSizes, sizes.thumbSizes);
 
             // 恢复墨迹（订阅方分帧执行：PDF 页墨迹 + 画板槽位/页签；无库时以空数据触发，把画板重置为 1/1 防上一文档残留）
@@ -483,13 +524,118 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
                 BeginWaitFirstScreenReady();
             }));
         }
+        catch (PdfRenderService.PasswordRequiredException)
+        {
+            ConsoleLog.Write("PDF打开", "需要密码");
+            await ShowPasswordDialog(path);   // 加载页保持打开，密码框盖在其上；撤页在弹窗放弃出口做
+        }
         catch (Exception ex)
         {
             IsOpeningPdf = false;   // 失败路径撤加载页（成功路径由首屏就绪轮询撤），再弹错误框
             ConsoleLog.Write("PDF打开", $"打开失败: {ex}");
             App.Log("OpenPdfFile", ex);
-            MessageBox.Show($"PDF 打开失败：{ex.Message}", "InkCanvasForPDF",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            await ShowOpenFailedDialog(path, ex.Message);   // iuwm 弹窗替代系统 MessageBox
+        }
+    }
+
+    /// <summary>PDF 打开失败的 iuwm 弹窗（替代系统 MessageBox）：确定=关闭，重试=同路径重开（再失败再次弹）。</summary>
+    private async Task ShowOpenFailedDialog(string path, string message)
+    {
+        try
+        {
+            var dialog = new iNKORE.UI.WPF.Modern.Controls.ContentDialog
+            {
+                Title = "PDF 打开失败",
+                Content = message,
+                PrimaryButtonText = "确定",
+                SecondaryButtonText = "重试",
+                Owner = Application.Current.MainWindow,
+            };
+            // 主按钮用强调样式（与更新日志/渐近线弹窗一致）
+            dialog.SetResourceReference(iNKORE.UI.WPF.Modern.Controls.ContentDialog.PrimaryButtonStyleProperty,
+                iNKORE.UI.WPF.Modern.ThemeKeys.AccentButtonStyleKey);
+            var result = await dialog.ShowAsync();
+            if (result == iNKORE.UI.WPF.Modern.Controls.ContentDialogResult.Secondary)
+                await OpenPdfFile(path);   // 重试：同路径重新打开，再次失败会再进 catch 再弹
+        }
+        catch (Exception ex)
+        {
+            App.Log("OpenPdfFile.Dialog", ex);   // 弹窗本身失败只记日志，不回退系统弹窗
+        }
+    }
+
+    /// <summary>密码 PDF 输入弹窗（iuwm ContentDialog + 最简 PasswordBox）：检测到密码时加载页保持打开、密码框盖在其上。
+    /// 打开=验证密码（错则弹窗不关+弹窗内红字提示，对则关闭+成功浮动通知并完成打开），关闭=放弃并撤加载页。</summary>
+    private async Task ShowPasswordDialog(string path)
+    {
+        try
+        {
+            var panel = new StackPanel { Margin = new Thickness(0, 4, 0, 0) };
+            panel.Children.Add(new TextBlock { Text = "此 PDF 受密码保护，请输入打开密码：", Margin = new Thickness(0, 0, 0, 8) });
+            var box = new PasswordBox { Width = 300 };   // 画廊最简用法，iuwm 主题接管样式
+            panel.Children.Add(box);
+            // 密码错误提示（弹窗内红字）：遮罩压住浮动通知，错误改在弹窗内部显示，初始隐藏
+            var errorText = new TextBlock
+            {
+                Text = "密码不正确，请重新输入密码",
+                Foreground = Brushes.Red,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 8, 0, 0),
+                Visibility = Visibility.Collapsed,
+            };
+            panel.Children.Add(errorText);
+
+            var dialog = new iNKORE.UI.WPF.Modern.Controls.ContentDialog
+            {
+                Title = "输入密码",
+                Content = panel,
+                PrimaryButtonText = "打开",
+                CloseButtonText = "关闭",
+                Owner = Application.Current.MainWindow,
+            };
+            // 主按钮强调样式（与打开失败/更新日志弹窗一致）
+            dialog.SetResourceReference(iNKORE.UI.WPF.Modern.Controls.ContentDialog.PrimaryButtonStyleProperty,
+                iNKORE.UI.WPF.Modern.ThemeKeys.AccentButtonStyleKey);
+            dialog.Opened += (_, _) => box.Focus();   // 弹出即聚焦密码框
+
+            bool validatedOk = false;
+            dialog.PrimaryButtonClick += async (_, e) =>
+            {
+                var deferral = e.GetDeferral();   // 异步验证期间弹窗保持打开
+                errorText.Visibility = Visibility.Collapsed;   // 每次尝试先清掉上次错误提示
+                try
+                {
+                    await Task.Run(() => _pdf.OpenDocument(path, box.Password));
+                    validatedOk = true;
+                }
+                catch (PdfRenderService.PasswordRequiredException)
+                {
+                    e.Cancel = true;   // 密码不正确：不关闭弹窗
+                    errorText.Visibility = Visibility.Visible;
+                    box.Focus(); box.SelectAll();
+                }
+                catch (Exception)
+                {
+                    // 非密码问题（如文件损坏/被删）：放行关闭，交回 OpenPdfFile 的打开失败弹窗
+                }
+                deferral.Complete();
+            };
+
+            var result = await dialog.ShowAsync();
+            if (result == iNKORE.UI.WPF.Modern.Controls.ContentDialogResult.Primary)
+            {
+                if (validatedOk)
+                    ShowTip?.Invoke("密码正确，已成功打开 PDF",
+                        iNKORE.UI.WPF.Modern.Controls.InfoBarSeverity.Success);
+                await OpenPdfFile(path, box.Password);   // 加载页全程保持 true，由重开的成功/失败路径接管撤页
+            }
+            else
+                IsOpeningPdf = false;   // 「关闭」放弃：撤加载页（检测到密码后加载页一直开着，必须在此收）
+        }
+        catch (Exception ex)
+        {
+            IsOpeningPdf = false;   // 弹窗自身出错：兜底撤加载页，避免永久转圈
+            App.Log("OpenPdfFile.PasswordDialog", ex);   // 弹窗本身失败只记日志
         }
     }
 
@@ -607,6 +753,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         _loadedStartIndex = _loadedEndIndex = -1;
         _thumbLoadedStartIndex = _thumbLoadedEndIndex = -1;
         _firstVisiblePageIndex = 0;
+        _pageRotations.Clear();   // 回到主页：逐页旋转态复位（下一文档按自身侧车 db 恢复）
         PageNumberText = "1";
         IsThumbnailPanelVisible = false;
         IsSettingsVisible = false;
@@ -656,23 +803,36 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
 
         for (int i = 0; i < thumbSizes.Length; i++)
         {
-            Thumbnails.Add(new ThumbnailModel { PageIndex = i, Width = thumbSizes[i].Width, Height = thumbSizes[i].Height });
+            // NaturalWidth/Height 为未旋转尺寸；显示尺寸按该页旋转角推算（旋转后缩略图宽度仍为 ThumbnailWidth）
+            int rotation = _pageRotations.TryGetValue(i, out var deg) ? deg : 0;
+            var thumb = new ThumbnailModel
+            {
+                PageIndex = i,
+                NaturalWidth = thumbSizes[i].Width,
+                NaturalHeight = thumbSizes[i].Height,
+                Rotation = rotation,
+            };
+            ApplyThumbnailRotation(thumb, rotation);
+            Thumbnails.Add(thumb);
         }
 
         // 缩略图顶部 DIP 前缀和先建：页面分批期间缩略图侧状态保持完整一致（ThumbnailScrollViewer_ScrollChanged 安全）。
-        _thumbTopDips = new double[Thumbnails.Count + 1];
-        double acc = 0;
-        for (int i = 0; i < Thumbnails.Count; i++)
-        {
-            _thumbTopDips[i] = acc;
-            acc += Thumbnails[i].Height;
-        }
-        _thumbTopDips[Thumbnails.Count] = acc;
+        RebuildThumbTopDips();
 
         // ② 分批填充新页容器：容器在布局帧内实现——批间让帧 = 每帧只实现一批（主修复）。
         for (int i = 0; i < pageSizes.Length; i++)
         {
-            Pages.Add(new PageModel { PageIndex = i, Width = pageSizes[i].Width, Height = pageSizes[i].Height });
+            // 内容尺寸固定为未旋转尺寸（墨迹坐标系）；显示槽位 = 该页旋转后的包围盒（位图由 PDFium 原生旋转）
+            int rotation = _pageRotations.TryGetValue(i, out var deg) ? deg : 0;
+            var page = new PageModel
+            {
+                PageIndex = i,
+                ContentWidth = pageSizes[i].Width,
+                ContentHeight = pageSizes[i].Height,
+                Rotation = rotation,
+            };
+            ApplyPageRotation(page, rotation);
+            Pages.Add(page);
             if (sw.ElapsedMilliseconds - lastSlice >= RebuildPageSliceMs)
             {
                 await Dispatcher.Yield(DispatcherPriority.Background);
@@ -682,14 +842,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
 
         // 构建页面顶部 DIP 前缀和：可见页查找由 O(N) 遍历降为 O(logN) 二分（页面高度固定，缩放仅整体乘 ZoomLevel）。
         // 必须在 _isRebuildingPages=false 之前完成，保证守卫解除时状态已一致。
-        _pageTopDips = new double[Pages.Count + 1];
-        acc = 0;
-        for (int i = 0; i < Pages.Count; i++)
-        {
-            _pageTopDips[i] = acc;
-            acc += Pages[i].Height;
-        }
-        _pageTopDips[Pages.Count] = acc;
+        RebuildPageTopDips();
 
         _isRebuildingPages = false;
 
@@ -843,6 +996,106 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         return (_pageTopDips[i] + i * PageVerticalMargin) * DisplayScale;
     }
 
+    /// <summary>旋转当前页（±90°，顺时针为正）：页面位图按新方向原生重渲染，显示槽位同步交换；
+    /// 墨迹坐标系不变（墨迹层仅显示旋转，不改 ISF）。其他页方向与尺寸不受影响。</summary>
+    public void RotateCurrentPage(int delta)
+    {
+        if (!HasPdf || Pages.Count == 0)
+            return;
+        int index = CurrentPage - 1;
+        if (index < 0 || index >= Pages.Count)
+            return;
+
+        var page = Pages[index];
+        int next = NormalizeRotation(page.Rotation + delta);
+        if (next == page.Rotation)
+            return;
+
+        page.Rotation = next;
+        ApplyPageRotation(page, next);
+        page.Image = null;   // 方向变了：按新旋转角重新渲染（缓存按 (页,旋转) 区分，不误用旧方向）
+
+        if (next == 0)
+            _pageRotations.Remove(index);
+        else
+            _pageRotations[index] = next;
+
+        RebuildPageTopDips();
+
+        // 缩略图同步（仅该页；位图尺寸/方向变化 → 清位图，由调用方按新布局重载）
+        if (index < Thumbnails.Count)
+        {
+            var thumb = Thumbnails[index];
+            ApplyThumbnailRotation(thumb, next);
+            thumb.Image = null;
+            thumb.IsLoading = false;
+            _thumbLoadedStartIndex = _thumbLoadedEndIndex = -1;   // 强制下一次 LoadThumbnails 重新加载（可见范围可能未变）
+            RebuildThumbTopDips();
+        }
+
+        ConsoleLog.Write("PDF旋转",
+            $"第{index + 1}页: 旋转={next}°, 槽位={page.Width}×{page.Height}, 内容={page.ContentWidth}×{page.ContentHeight}");
+    }
+
+    /// <summary>页面显示槽位 = 旋转后包围盒：90/270 时宽高交换，其余与内容尺寸相同。</summary>
+    private static void ApplyPageRotation(PageModel page, int rotation)
+    {
+        bool swap = rotation is 90 or 270;
+        page.Width = swap ? page.ContentHeight : page.ContentWidth;
+        page.Height = swap ? page.ContentWidth : page.ContentHeight;
+    }
+
+    /// <summary>缩略图显示尺寸（位图由渲染层按旋转角原生旋转，尺寸即显示尺寸）：
+    /// 旋转后显示宽度恒为 ThumbnailWidth（不撑破侧栏），高度按未旋转宽高比换算。</summary>
+    private static void ApplyThumbnailRotation(ThumbnailModel thumb, int rotation)
+    {
+        thumb.Rotation = rotation;
+        if (rotation is 90 or 270)
+        {
+            thumb.Width = ThumbnailWidth;
+            thumb.Height = Math.Max(1, (int)Math.Round(
+                ThumbnailWidth * (double)thumb.NaturalWidth / Math.Max(1, thumb.NaturalHeight)));
+        }
+        else
+        {
+            thumb.Width = thumb.NaturalWidth;
+            thumb.Height = thumb.NaturalHeight;
+        }
+    }
+
+    /// <summary>重建页面顶部 DIP 前缀和（页面高度 = 当前旋转下的显示槽位高）。</summary>
+    private void RebuildPageTopDips()
+    {
+        _pageTopDips = new double[Pages.Count + 1];
+        double acc = 0;
+        for (int i = 0; i < Pages.Count; i++)
+        {
+            _pageTopDips[i] = acc;
+            acc += Pages[i].Height;
+        }
+        _pageTopDips[Pages.Count] = acc;
+    }
+
+    /// <summary>重建缩略图顶部 DIP 前缀和（缩略图高度 = 当前旋转下的显示槽位高）。</summary>
+    private void RebuildThumbTopDips()
+    {
+        _thumbTopDips = new double[Thumbnails.Count + 1];
+        double acc = 0;
+        for (int i = 0; i < Thumbnails.Count; i++)
+        {
+            _thumbTopDips[i] = acc;
+            acc += Thumbnails[i].Height;
+        }
+        _thumbTopDips[Thumbnails.Count] = acc;
+    }
+
+    /// <summary>旋转角归一化：仅接受 0/90/180/270，其它值按 0 处理。</summary>
+    private static int NormalizeRotation(int degrees)
+    {
+        int r = ((degrees % 360) + 360) % 360;
+        return r is 0 or 90 or 180 or 270 ? r : 0;
+    }
+
     /// <summary>提交页码：解析输入框内容并跳页（Enter/失焦时调用）。</summary>
     public void CommitPageNumber()
     {
@@ -937,8 +1190,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
 
         // 渲染缺失的缩略图：后台线程渲染（并发受限、独立 reader），完成后 Dispatcher 更新 UI——
         // 避免大 PDF 打开/快速滚动时逐张阻塞 UI 线程。
-        // 渲染宽度乘 DPI 系数：高 DPI 屏物理像素充足，缩略图不发糊（仍为低分辨率小图，内存受控）。
-        int thumbW = (int)Math.Round(ThumbnailWidth * Math.Max(1.0, _dpiScale));
+        // 渲染宽度取该页旋转后的显示宽 × DPI 系数：位图由 PDFium 原生旋转，旋转后宽度恒为 ThumbnailWidth。
         for (int i = startIndex; i <= endIndex; i++)
         {
             var thumb = Thumbnails[i];
@@ -946,14 +1198,18 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
                 continue;
             thumb.IsLoading = true;
             int index = i;
-            _pdf.RenderThumbnailAsync(index, thumbW).ContinueWith(t =>
+            int rotation = thumb.Rotation;
+            int logicalWidth = thumb.Width;   // 旋转后显示宽（DIP）；完成回调据此校验方向/尺寸未变
+            int thumbW = (int)Math.Round(logicalWidth * Math.Max(1.0, _dpiScale));
+            _pdf.RenderThumbnailAsync(index, thumbW, rotation).ContinueWith(t =>
             {
                 var img = t.Status == TaskStatus.RanToCompletion ? t.Result : null;
                 Application.Current?.Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
                 {
                     thumb.IsLoading = false;
-                    // ReloadPages 可能已重建集合：仅当模型仍在集合中才更新（旧对象更新无意义）。
-                    if (img != null && index < Thumbnails.Count && ReferenceEquals(Thumbnails[index], thumb))
+                    // ReloadPages 可能已重建集合 / 该页旋转角已变：仅当模型与方向都未变才回填。
+                    if (img != null && index < Thumbnails.Count && ReferenceEquals(Thumbnails[index], thumb)
+                        && thumb.Rotation == rotation && thumb.Width == logicalWidth)
                         thumb.Image = img;
                 }));
             });
@@ -1018,21 +1274,27 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
             return;
         var page = Pages[index];
         _pendingPageRenders.Add(index);
+        int rotation = page.Rotation;   // 位图按该页旋转角原生渲染；完成回调校验方向未变
         Task<ImageSource> task = wantHi
-            ? _pdf.RenderPageAsync(index, GetRenderWidth(page.Width), page.Width, page.Height)
-            : _pdf.RenderPageBaseAsync(index, GetBaseWidth(page.Width), page.Width, page.Height);
+            ? _pdf.RenderPageAsync(index, GetRenderWidth(page.Width), page.Width, page.Height, rotation)
+            : _pdf.RenderPageBaseAsync(index, GetBaseWidth(page.Width), page.Width, page.Height, rotation);
         task.ContinueWith(t => Application.Current?.Dispatcher.BeginInvoke(
             DispatcherPriority.Background,
-            new Action(() => CompletePageRender(index, page, t))));
+            new Action(() => CompletePageRender(index, page, rotation, t))));
     }
 
     /// <summary>后台渲染完成回填（UI 线程，Background 优先级——不与输入/湿墨抢帧）：
-    /// 校验页模型仍有效后按当前期望宽度决定：赋值 / 丢弃（尺寸过期且已滚出缓冲）/ 按当前期望重发。</summary>
-    private void CompletePageRender(int index, PageModel page, Task<ImageSource> task)
+    /// 校验页模型仍有效、方向未变后按当前期望宽度决定：赋值 / 丢弃（尺寸过期且已滚出缓冲）/ 按当前期望重发。</summary>
+    private void CompletePageRender(int index, PageModel page, int rotation, Task<ImageSource> task)
     {
         _pendingPageRenders.Remove(index);
         if (index >= Pages.Count || !ReferenceEquals(Pages[index], page))
             return;   // 文档已重建，丢弃
+        if (page.Rotation != rotation)
+        {
+            StartPageRender(index, _lastRequestNeedHi && index >= _lastRequestFirst && index <= _lastRequestLast);   // 旋转角已变：按新方向重发
+            return;
+        }
         if (!task.IsCompletedSuccessfully)
         {
             App.Log($"RenderPage p{index}", task.Exception?.GetBaseException());

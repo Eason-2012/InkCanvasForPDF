@@ -76,8 +76,11 @@ public partial class MainWindow : Window
     private bool _dirtyBoardInk;                                          // 画板画布待写
     private readonly Dictionary<Stroke, int> _strokePage = new();         // 笔画→页（点变换/属性改标脏用）
     private DispatcherTimer? _inkSaveTimer;
-    private InkCircleCursor? _inkCursor;                                                    // 自定义墨迹光标（橡皮=黑板擦 / 批注笔尖=圆点，消除"小一圈"）
-    private double _inkCursorDiameter;                                                      // 当前光标宽（屏幕 DIP），变化 ≥1 才重建
+    private InkCircleCursor? _inkCursor;                                                    // 自定义墨迹光标（橡皮=黑板擦 / 批注笔尖=与笔尖同形，消除"小一圈"）
+    private double _inkCursorWidth;                                                         // 当前光标宽（屏幕 DIP），变化 ≥0.01 才重建
+    private double _inkCursorHeight;                                                        // 当前光标高（屏幕 DIP，荧光笔竖长方形宽高不等）
+    private bool _inkCursorIsRect;                                                          // 当前光标是否矩形笔尖（缓存键之一）
+    private double _inkCursorRotateDeg;                                                     // 当前光标斜置角（0=不斜，缓存键之一）
     private Color _inkCursorColor;                                                          // 当前光标颜色（缓存键之一：换色/荧光笔 alpha 变化立即重建）
     private bool _inkCursorIsEraser;                                                        // 当前光标是否橡皮样式（缓存键之一）
 
@@ -128,6 +131,12 @@ public partial class MainWindow : Window
             Board.ApplyHighlighterPressureEnabled(enabled);
         };
         Board.ApplyHighlighterPressureEnabled(_viewModel.Settings.HighlighterPressureEnabled);   // 启动即同步一次
+        SettingsView.BrushInkStyleChanged += enabled =>            // 毛笔墨迹样式即时同步画板笔尖
+            Board.ApplyBrushInkStyle(enabled);
+        Board.ApplyBrushInkStyle(_viewModel.Settings.BrushInkStyleEnabled);   // 启动即同步一次
+        SettingsView.HighlighterInkStyleChanged += enabled =>      // 荧光笔墨迹样式即时同步画板笔尖
+            Board.ApplyHighlighterInkStyle(enabled);
+        Board.ApplyHighlighterInkStyle(_viewModel.Settings.HighlighterInkStyleEnabled);   // 启动即同步一次
         SettingsView.PenStyleChanged += style =>   // 笔锋样式全局唯一：设置页改 → 画板即时跟随
         {
             BoardView.Settings.Canvas.InkStyle = style;
@@ -157,6 +166,7 @@ public partial class MainWindow : Window
         _inkToShape.PauseSimilarityThreshold = _viewModel.Settings.PauseInkToShapeSensitivity / 100.0;   // 启动即同步一次
         PushPauseInkToShapeToBoard();
         _viewModel.RequestScrollToPage = ScrollToPage;
+        _viewModel.ShowTip = (msg, sev) => ShowFloatingTip(msg, sev);   // 密码弹窗等的浮动通知（显式两参 lambda，避免可选参数方法组转换问题）
         // 撤销回放（画板 MW_TimeMachine.ApplyHistoryToCanvas 逐行等价：UserInput/Clear 两类，
         // 直改条目 TargetStrokes——发生页的笔画集合实例；首尾设置/还原 CodeInput 门）
         _viewModel.InkTool.ApplyHistoryToCanvas = item =>
@@ -1276,6 +1286,53 @@ public partial class MainWindow : Window
         sv.ScrollToVerticalOffset((oldOffsetY + center.Y) * ratio - center.Y);
     }
 
+    /// <summary>工具栏逆时针旋转：页面视图旋转 -90°。</summary>
+    private void RotateCounterClockwiseButton_Click(object sender, RoutedEventArgs e) => RotatePdfView(-90);
+
+    /// <summary>工具栏顺时针旋转：页面视图旋转 +90°。</summary>
+    private void RotateClockwiseButton_Click(object sender, RoutedEventArgs e) => RotatePdfView(90);
+
+    /// <summary>旋转当前页（顺时针为正），保持当前页在视口中的相对位置，并立即持久化逐页旋转态。</summary>
+    private void RotatePdfView(int delta)
+    {
+        if (!_viewModel.HasPdf)
+            return;
+
+        int page = _viewModel.CurrentPage;
+        double rel = 0;
+        if (_pdfScrollViewer is { } sv)
+        {
+            double pageTop = _viewModel.GetPageVerticalOffset(page - 1);
+            double pageHeight = _viewModel.GetPageVerticalOffset(page) - pageTop;   // 当前页高（含页间距近似）
+            if (pageHeight > 0)
+                rel = Math.Clamp((sv.VerticalOffset - pageTop) / pageHeight, 0.0, 1.0);
+        }
+
+        _viewModel.RotateCurrentPage(delta);
+
+        if (_pdfScrollViewer is { } after)
+        {
+            after.UpdateLayout();   // 槽位宽高已交换：先完成布局再按页内比例恢复滚动位置
+            double newTop = _viewModel.GetPageVerticalOffset(page - 1);
+            double newHeight = _viewModel.GetPageVerticalOffset(page) - newTop;
+            after.ScrollToVerticalOffset(newTop + rel * newHeight);
+            after.ScrollToHorizontalOffset(Math.Max(0, after.ScrollableWidth / 2));   // 旋转后宽页居中
+            _viewModel.UpdateVisiblePages(after.VerticalOffset, after.ViewportHeight);   // 该页位图已置空：立即按新方向重渲染
+        }
+
+        // 缩略图尺寸/方向变化后需重新加载（VM 已清该页位图并复位加载范围）
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+        {
+            if (_thumbScrollViewer != null)
+            {
+                _viewModel.UpdateVisibleThumbnails(_thumbScrollViewer.VerticalOffset,
+                    _thumbScrollViewer.ViewportHeight, _thumbScrollViewer.ExtentHeight);
+            }
+        }));
+
+        SaveViewStateNow();   // 旋转态立即写入侧车 db（关闭时 FlushInkStore 会再全量写一次）
+    }
+
     /// <summary>视口宽度变化时按新宽度重新渲染页面。</summary>
     private void ScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -1643,16 +1700,25 @@ public partial class MainWindow : Window
         // 落入下方 else 还原 XAML 默认（Cursor="Pen" + ForceCursor=false，与 ICA 擦除模式配置一致）
         bool palmErasing = _palmEraseCanvases.Count > 0;
         bool customEraser = palmErasing || (tool == InkToolMode.Eraser && !_viewModel.InkTool.IsStrokeEraser);
-        double diameter;
+        double w, h;
+        bool isRect = false;
+        double rotateDeg = 0;
         if (customEraser)
         {
             // 屏幕擦除宽：面积擦恒为 EraserSize（EraserShape 已按 DisplayScale 反向补偿）；手掌擦除 = 手掌洞
-            diameter = palmErasing && _palmEraseScreenSize > 0 ? _palmEraseScreenSize : _viewModel.InkTool.EraserSize;
+            double diameter = palmErasing && _palmEraseScreenSize > 0 ? _palmEraseScreenSize : _viewModel.InkTool.EraserSize;
+            w = h = diameter;
         }
         else if (tool == InkToolMode.Pen && !_viewModel.InkTool.ShowPenCursor)
         {
-            // 笔迹屏幕宽度 = DrawingAttributes 宽 × 整层 DisplayScale（InkWidth/荧光笔加粗实时反映）
-            diameter = _viewModel.InkTool.DrawingAttributes.Width * _viewModel.DisplayScale;
+            // 笔尖屏幕尺寸 = DA 宽高 × 整层 DisplayScale；光标与笔尖同形（荧光笔竖长方形 / 毛笔斜椭圆 / 普通圆点）
+            var da = _viewModel.InkTool.DrawingAttributes;
+            w = da.Width * _viewModel.DisplayScale;
+            h = da.Height * _viewModel.DisplayScale;
+            isRect = da.StylusTip == StylusTip.Rectangle;
+            rotateDeg = da.StylusTipTransform.IsIdentity ? 0 : InkToolViewModel.BrushTipAngleDeg;
+            if (!isRect && rotateDeg != 0)
+                w *= InkToolViewModel.BrushTipSquash;   // 斜椭圆：圆点先横向压扁再旋转（与笔尖变换同序）
         }
         else
         {
@@ -1665,23 +1731,28 @@ public partial class MainWindow : Window
             return;
         }
 
-        diameter = Math.Clamp(diameter, 4, 256);   // 上限与 InkCircleCursor.Create 的 256 DIP 一致（手掌洞可能远大于橡皮）
+        w = Math.Clamp(w, 4, 256);   // 上下限与 InkCircleCursor.Create 的 4/256 DIP 一致（手掌洞可能远大于橡皮）
+        h = Math.Clamp(h, 4, 256);
         bool isEraser = customEraser;
         var color = isEraser ? Colors.White : _viewModel.InkTool.DrawingAttributes.Color;
-        // 直径变化 >0.01 DIP 或 颜色/样式变化 就重建（0.01 只挡浮点噪声：手掌 footprint 逐次浮动，
-        // 原 1 DIP 阈值会停在上一次尺寸 → 擦除洞比光标大一圈；直径不变的重复调用仍走缓存）
-        if (_inkCursor == null || Math.Abs(_inkCursorDiameter - diameter) > 0.01 ||
+        // 宽或高变化 >0.01 DIP 或 形状/旋转/颜色/样式变化 就重建（0.01 只挡浮点噪声：手掌 footprint 逐次浮动，
+        // 原 1 DIP 阈值会停在上一次尺寸 → 擦除洞比光标大一圈；尺寸不变的重复调用仍走缓存）
+        if (_inkCursor == null || Math.Abs(_inkCursorWidth - w) > 0.01 || Math.Abs(_inkCursorHeight - h) > 0.01 ||
+            _inkCursorIsRect != isRect || _inkCursorRotateDeg != rotateDeg ||
             _inkCursorColor != color || _inkCursorIsEraser != isEraser)
         {
             double dpi = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
             var created = isEraser
-                ? InkCircleCursor.CreateEraserBoard(diameter, dpi)                               // 黑板擦位图（38:56）= 擦除矩形
-                : InkCircleCursor.CreatePenDot(diameter, dpi, color);                            // 同色实心圆点（荧光笔 alpha 原样）= 笔迹
+                ? InkCircleCursor.CreateEraserBoard(w, dpi)                           // 黑板擦位图（38:56）= 擦除矩形
+                : InkCircleCursor.CreatePenTip(w, h, dpi, color, isRect, rotateDeg);  // 与笔尖同形同色（荧光笔 alpha 原样）
             if (created == null)
                 return;
             var old = _inkCursor;
             _inkCursor = created;            // 先赋新再释放旧：避免销毁仍被画布引用的光标句柄
-            _inkCursorDiameter = diameter;
+            _inkCursorWidth = w;
+            _inkCursorHeight = h;
+            _inkCursorIsRect = isRect;
+            _inkCursorRotateDeg = rotateDeg;
             _inkCursorColor = color;
             _inkCursorIsEraser = isEraser;
             old?.Dispose();
@@ -2303,24 +2374,14 @@ public partial class MainWindow : Window
         _dirtyBoardInk = false;
     }
 
-    /// <summary>关闭/切换文档兜底保存（DocumentClosing 订阅 + OnClosed 调用；InkStoreService.Dispose 有守卫，重入安全）。</summary>
-    private void FlushInkStore()
+    /// <summary>构造侧车 db 的 view_state 全量表（显示位置 + 菜单记忆；整表替换，必须每次全量写）。
+    /// 关闭流程与「旋转」按钮即时持久化共用同一份键集合。</summary>
+    private Dictionary<string, string> BuildViewState()
     {
-        _inkSaveTimer?.Stop();
-        var store = _viewModel.InkStore;
-        if (store == null)
-        {
-            _dirtyPdfPages.Clear();
-            _dirtyBoardInk = false;
-            return;
-        }
-
-        // ① 显示位置（ZoomLevel / 滚动偏移 / 当前页 / 画板页签）+ 菜单记忆（整表替换：必须全量写，
-        //    漏键会被 DELETE 清掉；被迁字段已 JsonIgnore 不入 Settings.json）
         var (bc, bt) = Board.GetBoardPageState();
         var s = _viewModel.Settings;
         var bs = BoardView.Settings;
-        store.SaveViewState(new Dictionary<string, string>
+        var values = new Dictionary<string, string>
         {
             ["pdf_zoom"] = _viewModel.ZoomLevel.ToString(CultureInfo.InvariantCulture),
             ["pdf_offset"] = (_pdfScrollViewer?.VerticalOffset ?? 0).ToString(CultureInfo.InvariantCulture),
@@ -2353,7 +2414,42 @@ public partial class MainWindow : Window
             ["board_gesture_pan"] = bs.Gesture.IsEnableTwoFingerTranslate ? "1" : "0",
             ["board_gesture_rotate"] = bs.Gesture.IsEnableTwoFingerRotation ? "1" : "0",
             ["board_shape_pinned"] = Board.ShapePanelPinned ? "1" : "0",
-        });
+        };
+
+        // 逐页旋转态：键 pdf_rot_{0-based页索引}，仅非 0 写入
+        foreach (var page in _viewModel.Pages)
+        {
+            if (page.Rotation != 0)
+                values[$"pdf_rot_{page.PageIndex}"] = page.Rotation.ToString(CultureInfo.InvariantCulture);
+        }
+        return values;
+    }
+
+    /// <summary>立即把视图状态写入侧车 db（旋转按钮需要即时持久化；无库时不写）。</summary>
+    private void SaveViewStateNow()
+    {
+        var store = _viewModel.InkStore;
+        if (store == null)
+            return;
+        store.SaveViewState(BuildViewState());
+    }
+
+    /// <summary>关闭/切换文档兜底保存（DocumentClosing 订阅 + OnClosed 调用；InkStoreService.Dispose 有守卫，重入安全）。</summary>
+    private void FlushInkStore()
+    {
+        _inkSaveTimer?.Stop();
+        var store = _viewModel.InkStore;
+        if (store == null)
+        {
+            _dirtyPdfPages.Clear();
+            _dirtyBoardInk = false;
+            return;
+        }
+
+        // ① 显示位置（ZoomLevel / 滚动偏移 / 当前页 / 画板页签）+ 菜单记忆（整表替换：必须全量写，
+        //    漏键会被 DELETE 清掉；被迁字段已 JsonIgnore 不入 Settings.json）
+        store.SaveViewState(BuildViewState());
+        var (_, bt) = Board.GetBoardPageState();
         store.TrimBoardSlots(bt);   // 清陈旧槽位（任务链排在 SaveViewState 之后，D9）
 
         // ② 去抖窗口内未及写入的墨迹（画布此刻即最终态）

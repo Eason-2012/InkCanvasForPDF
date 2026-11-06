@@ -476,9 +476,10 @@ public partial class MainWindow
             if (dec.Count >= 1 && _selectionInkCanvas != null)
             {
                 ManipulationDelta md = e.DeltaManipulation;
-                Vector trans = md.Translation;
+                // ManipulationDelta 是屏幕坐标：页面视图旋转后需换算回页面画布坐标（否则拖移/缩放方向错轴）
+                Vector trans = ToCanvasTranslation(md.Translation);
                 double rotate = md.Rotation;
-                Vector scale = md.Scale;
+                Vector scale = ToCanvasScale(md.Scale);
                 Rect bounds = _selectionInkCanvas.GetSelectionBounds();
                 Point center = new Point(bounds.Left + bounds.Width / 2, bounds.Top + bounds.Height / 2);
                 Matrix m = new Matrix();
@@ -516,8 +517,8 @@ public partial class MainWindow
                     stroke.Transform(m, false);
                     try
                     {
-                        stroke.DrawingAttributes.Width *= md.Scale.X;
-                        stroke.DrawingAttributes.Height *= md.Scale.Y;
+                        stroke.DrawingAttributes.Width *= scale.X;
+                        stroke.DrawingAttributes.Height *= scale.Y;
                     }
                     catch { }
                 }
@@ -526,6 +527,28 @@ public partial class MainWindow
         }
         catch { }
     }
+
+    /// <summary>选区所在页的旋转角（每页独立旋转；非选择状态按 0 处理）。</summary>
+    private int SelectionPageRotation
+        => _selectionInkCanvas?.DataContext is InkCanvasForPDF.Models.PageModel page ? page.Rotation : 0;
+
+    /// <summary>屏幕坐标位移 → 页面画布坐标（选区页旋转 90/180/270 时反算 R(-θ)；未旋转原样返回）。</summary>
+    private Vector ToCanvasTranslation(Vector screenDelta)
+    {
+        switch (SelectionPageRotation)
+        {
+            case 90: return new Vector(screenDelta.Y, -screenDelta.X);
+            case 180: return new Vector(-screenDelta.X, -screenDelta.Y);
+            case 270: return new Vector(-screenDelta.Y, screenDelta.X);
+            default: return screenDelta;
+        }
+    }
+
+    /// <summary>屏幕坐标缩放 → 页面画布坐标缩放（选区页旋转 90/270 时两轴互换）。</summary>
+    private Vector ToCanvasScale(Vector screenScale)
+        => SelectionPageRotation is 90 or 270
+            ? new Vector(screenScale.Y, screenScale.X)
+            : screenScale;
 
     Point lastTouchPointOnGridInkCanvasCover = new Point(0, 0);
     private void GridInkCanvasSelectionCover_PreviewTouchDown(object sender, TouchEventArgs e)

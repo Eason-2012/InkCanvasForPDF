@@ -498,6 +498,23 @@ namespace InkCanvasForPDF.Board
             RefreshTimePressureArmed();
         }
 
+        private bool _brushInkStyleEnabled = true;
+        private bool _highlighterInkStyleEnabled = true;
+
+        /// <summary>启用中国传统毛笔墨迹样式（主设置 brushInkStyleEnabled；由 MainWindow 注入，作用于画板硬笔/软笔笔尖）。</summary>
+        public void ApplyBrushInkStyle(bool enabled)
+        {
+            _brushInkStyleEnabled = enabled;
+            CheckColorTheme();   // 重建画板 DrawingAttributes（isLoaded/drawingAttributes 门控在方法内）
+        }
+
+        /// <summary>荧光笔启用荧光笔墨迹样式（主设置 highlighterInkStyleEnabled；由 MainWindow 注入，作用于画板荧光笔笔尖）。</summary>
+        public void ApplyHighlighterInkStyle(bool enabled)
+        {
+            _highlighterInkStyleEnabled = enabled;
+            CheckColorTheme();
+        }
+
         /// <summary>画板主题切换：在 UserControl.Resources.MergedDictionaries 中原地替换 Light-Board/Dark-Board
         /// （移植 ICA SetBoardTheme；保留本地合并——MW_BoardCore 的 BoardBarBackgroundBrush 依赖控件级查找）。</summary>
         public void SetBoardTheme(bool dark)

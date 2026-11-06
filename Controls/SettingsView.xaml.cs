@@ -31,6 +31,12 @@ public partial class SettingsView : System.Windows.Controls.UserControl
     /// <summary>「荧光笔启用压力感应」切换时触发（由 MainWindow 同步 PDF 页面控制器与画板）。</summary>
     public event Action<bool>? HighlighterPressureChanged;
 
+    /// <summary>「启用中国传统毛笔墨迹样式」切换时触发（由 MainWindow 同步画板笔尖，PDF 侧走 InkTool 即时生效）。</summary>
+    public event Action<bool>? BrushInkStyleChanged;
+
+    /// <summary>「荧光笔启用荧光笔墨迹样式」切换时触发（由 MainWindow 同步画板笔尖，PDF 侧走 InkTool 即时生效）。</summary>
+    public event Action<bool>? HighlighterInkStyleChanged;
+
     /// <summary>「选择笔锋样式」变更时触发（由 MainWindow 同步画板侧 InkStyle 并落盘）。</summary>
     public event Action<int>? PenStyleChanged;
 
@@ -387,6 +393,24 @@ public partial class SettingsView : System.Windows.Controls.UserControl
         if (Vm is not { } vm)
             return;
         HighlighterPressureChanged?.Invoke(vm.Settings.HighlighterPressureEnabled);   // 同步 PDF 与画板即时生效
+        SettingsService.Save(vm.Settings);
+    }
+
+    private void BrushInkStyleToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (Vm is not { } vm)
+            return;
+        vm.InkTool.BrushInkStyleEnabled = vm.Settings.BrushInkStyleEnabled;   // PDF 侧即时生效（重建 DA → 刷新笔尖光标）
+        BrushInkStyleChanged?.Invoke(vm.Settings.BrushInkStyleEnabled);       // 同步画板
+        SettingsService.Save(vm.Settings);
+    }
+
+    private void HighlighterInkStyleToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (Vm is not { } vm)
+            return;
+        vm.InkTool.HighlighterInkStyleEnabled = vm.Settings.HighlighterInkStyleEnabled;   // PDF 侧即时生效（重建 DA → 刷新笔尖光标）
+        HighlighterInkStyleChanged?.Invoke(vm.Settings.HighlighterInkStyleEnabled);       // 同步画板
         SettingsService.Save(vm.Settings);
     }
 

@@ -166,6 +166,26 @@
                                 </ComboBox>
                             </ui:SettingsCard>
 
+                            <ui:SettingsCard Header="启用中国传统毛笔墨迹样式" Description="开启后，墨迹点会变为类似传统毛笔的斜向椭圆形墨迹点，可达到类似毛笔的起笔和收笔效果">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="TableCellCrossBrush" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ui:ToggleSwitch x:Name="BrushInkStyleToggle"
+                                                 IsOn="{Binding Settings.BrushInkStyleEnabled, Mode=TwoWay}"
+                                                 OffContent="关" OnContent="开"
+                                                 Toggled="BrushInkStyleToggle_Toggled"/>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="荧光笔启用荧光笔墨迹样式" Description="开启后，墨迹点会变为类似真实荧光笔的长方形墨迹点">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="Highlight" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ui:ToggleSwitch x:Name="HighlighterInkStyleToggle"
+                                                 IsOn="{Binding Settings.HighlighterInkStyleEnabled, Mode=TwoWay}"
+                                                 OffContent="关" OnContent="开"
+                                                 Toggled="HighlighterInkStyleToggle_Toggled"/>
+                            </ui:SettingsCard>
+
                         </ikw:SimpleStackPanel>
                     </ScrollViewer>
                 </Grid>

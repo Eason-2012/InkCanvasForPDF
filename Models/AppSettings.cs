@@ -111,6 +111,14 @@ public class AppSettings
     [JsonPropertyName("highlighterPressureEnabled")]
     public bool HighlighterPressureEnabled { get; set; } = false;
 
+    /// <summary>启用中国传统毛笔墨迹样式：开启后硬笔/软笔墨迹点变为斜向椭圆形（类似传统毛笔起笔收笔）；默认开启。</summary>
+    [JsonPropertyName("brushInkStyleEnabled")]
+    public bool BrushInkStyleEnabled { get; set; } = true;
+
+    /// <summary>荧光笔启用荧光笔墨迹样式：开启后荧光笔墨迹点变为长方形（类似真实荧光笔）；默认开启。</summary>
+    [JsonPropertyName("highlighterInkStyleEnabled")]
+    public bool HighlighterInkStyleEnabled { get; set; } = true;
+
     /// <summary>批注画笔粗细（1~30）。</summary>
     [JsonPropertyName("inkWidth")]
     public double InkWidth { get; set; } = 3;

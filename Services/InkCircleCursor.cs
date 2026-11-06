@@ -32,14 +32,27 @@ internal sealed class InkCircleCursor : IDisposable
     /// <summary>黑板擦高度 = 宽 × 56/38（擦除形状与光标共用同一换算）。</summary>
     public static double EraserBoardHeight(double widthDips) => widthDips * EraserBoardAspect;
 
-    /// <summary>批注笔尖光标：与画笔同色的实心圆点（ARGB 原样使用，荧光笔透明度一致），
-    /// 直径 = 笔迹的屏幕实际宽度。</summary>
-    public static InkCircleCursor? CreatePenDot(double diameterDips, double dpiScale, Color color)
+    /// <summary>批注笔尖光标：与笔尖同形同色的实心形状（ARGB 原样使用，荧光笔透明度一致），
+    /// 尺寸 = 笔尖的屏幕实际宽高；rectangle=竖长方形（荧光笔），rotateDeg≠0=斜向椭圆（毛笔样式），
+    /// 否则圆/椭圆点。</summary>
+    public static InkCircleCursor? CreatePenTip(double widthDips, double heightDips, double dpiScale, Color color,
+                                                bool rectangle, double rotateDeg)
     {
-        return Create(diameterDips, diameterDips, dpiScale, (dc, rect) =>
-            dc.DrawEllipse(new SolidColorBrush(color), null,
-                new Point(rect.Left + rect.Width / 2, rect.Top + rect.Height / 2),
-                rect.Width / 2, rect.Height / 2));
+        return Create(widthDips, heightDips, dpiScale, (dc, rect) =>
+        {
+            var brush = new SolidColorBrush(color);
+            var center = new Point(rect.Left + rect.Width / 2, rect.Top + rect.Height / 2);
+            if (rectangle)
+            {
+                dc.DrawRectangle(brush, null, rect);   // 方角矩形（与荧光笔笔尖一致）
+                return;
+            }
+            if (rotateDeg != 0)
+                dc.PushTransform(new RotateTransform(rotateDeg, center.X, center.Y));
+            dc.DrawEllipse(brush, null, center, rect.Width / 2, rect.Height / 2);
+            if (rotateDeg != 0)
+                dc.Pop();
+        });
     }
 
     /// <summary>黑板擦光标：米白圆角矩形 + 灰描边 + 双竖条纹（38:56，自行绘制），

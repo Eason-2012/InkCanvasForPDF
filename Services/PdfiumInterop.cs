@@ -27,6 +27,13 @@ internal static class PdfiumInterop
     internal static IntPtr FPDF_LoadDocument(string filePath, string? password)
     { lock (PdfiumLock) return FPDF_LoadDocumentRaw(filePath, password); }
 
+    [DllImport("pdfium.dll", EntryPoint = "FPDF_GetLastError", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int FPDF_GetLastErrorRaw();
+
+    /// <summary>取最近一次原生调用的错误码（须在失败调用后、同锁内立即读取）。4=FPDF_ERR_PASSWORD。</summary>
+    internal static int FPDF_GetLastError()
+    { lock (PdfiumLock) return FPDF_GetLastErrorRaw(); }
+
     [DllImport("pdfium.dll", EntryPoint = "FPDF_CloseDocument", CallingConvention = CallingConvention.Cdecl)]
     private static extern void FPDF_CloseDocumentRaw(IntPtr document);
     internal static void FPDF_CloseDocument(IntPtr document)
@@ -90,7 +97,8 @@ internal static class PdfiumInterop
     private const int FpdfAnnot = 0x01;
     private const int FpdfLcdText = 0x02;
 
-    /// <summary>将一页栅格化为 BGRA 像素（叠白 + 注释外观 + LCD 文本）。
+    /// <summary>将一页栅格化为 BGRA 像素（叠白 + 注释外观 + LCD 文本），始终按页面未旋转方向输出。
+    /// 旋转由 PdfRenderService 在像素层完成。
     /// 持锁 LoadPage→渲染→ClosePage；句柄无效或渲染失败返回 null。
     /// 缩略图/页面渲染共用此入口，由 PdfiumLock 串行保证线程安全。</summary>
     internal static byte[]? FPDF_RenderPage(IntPtr document, int pageIndex, int width, int height)

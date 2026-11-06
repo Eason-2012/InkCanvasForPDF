@@ -25,11 +25,31 @@ namespace InkCanvasForPDF.Board
             SaveActiveWidthToStore();
             if (inkColor > 100)
             {
+                drawingAttributes.StylusTipTransform = Matrix.Identity;   // 荧光笔永不斜置（原地改 DA，必须显式复位）
                 drawingAttributes.Height = 30 + ((Slider)sender).Value;
-                drawingAttributes.Width = 30 + ((Slider)sender).Value;
+                if (_highlighterInkStyleEnabled)
+                {
+                    drawingAttributes.StylusTip = StylusTip.Rectangle;   // 荧光笔竖长方体笔尖（方角矩形）
+                    drawingAttributes.Width = drawingAttributes.Height / 2;   // 宽 = 高的一半（1:2）
+                }
+                else
+                {
+                    drawingAttributes.StylusTip = StylusTip.Ellipse;   // 关=圆形
+                    drawingAttributes.Width = drawingAttributes.Height;
+                }
             }
             else
             {
+                drawingAttributes.StylusTip = StylusTip.Ellipse;   // 切回画笔复位为 WPF 默认圆点笔尖
+                if (_brushInkStyleEnabled)
+                {
+                    Matrix tip = Matrix.Identity;   // 必须从 Identity 起算（default 零矩阵会退化）
+                    tip.Scale(ViewModels.InkToolViewModel.BrushTipSquash, 1.0);   // 横向压扁（与 PDF 侧笔尖共用常量）
+                    tip.Rotate(ViewModels.InkToolViewModel.BrushTipAngleDeg);     // 斜置（先压扁后旋转）
+                    drawingAttributes.StylusTipTransform = tip;
+                }
+                else
+                    drawingAttributes.StylusTipTransform = Matrix.Identity;   // 关=普通圆点
                 drawingAttributes.Height = ((Slider)sender).Value / 2;
                 drawingAttributes.Width = ((Slider)sender).Value / 2;
             }
@@ -250,8 +270,18 @@ namespace InkCanvasForPDF.Board
             {
                 if (inkColor > 100)
                 {
+                    drawingAttributes.StylusTipTransform = Matrix.Identity;   // 荧光笔永不斜置（原地改 DA，必须显式复位）
                     drawingAttributes.Height = 30 + Settings.Canvas.InkWidth * 2;   // 对齐 ICA：实际宽 = 30 + 滑块值（滑块值 = InkWidth×2）
-                    drawingAttributes.Width = 30 + Settings.Canvas.InkWidth * 2;
+                    if (_highlighterInkStyleEnabled)
+                    {
+                        drawingAttributes.StylusTip = StylusTip.Rectangle;   // 荧光笔竖长方体笔尖（方角矩形，固定竖直不随笔迹旋转）
+                        drawingAttributes.Width = drawingAttributes.Height / 2;   // 宽 = 高的一半（1:2）：横画粗细不变、竖画变细
+                    }
+                    else
+                    {
+                        drawingAttributes.StylusTip = StylusTip.Ellipse;   // 关=圆形荧光笔
+                        drawingAttributes.Width = drawingAttributes.Height;
+                    }
                     byte NowR = drawingAttributes.Color.R;
                     byte NowG = drawingAttributes.Color.G;
                     byte NowB = drawingAttributes.Color.B;
@@ -261,6 +291,16 @@ namespace InkCanvasForPDF.Board
                 }
                 else
                 {
+                    drawingAttributes.StylusTip = StylusTip.Ellipse;   // 切回画笔复位为 WPF 默认圆点笔尖
+                    if (_brushInkStyleEnabled)
+                    {
+                        Matrix tip = Matrix.Identity;   // 必须从 Identity 起算（default 零矩阵会退化）
+                        tip.Scale(ViewModels.InkToolViewModel.BrushTipSquash, 1.0);   // 横向压扁（与 PDF 侧笔尖共用常量）
+                        tip.Rotate(ViewModels.InkToolViewModel.BrushTipAngleDeg);     // 斜置（先压扁后旋转）
+                        drawingAttributes.StylusTipTransform = tip;
+                    }
+                    else
+                        drawingAttributes.StylusTipTransform = Matrix.Identity;   // 关=普通圆点
                     drawingAttributes.Height = Settings.Canvas.InkWidth;
                     drawingAttributes.Width = Settings.Canvas.InkWidth;
                     drawingAttributes.IsHighlighter = false;

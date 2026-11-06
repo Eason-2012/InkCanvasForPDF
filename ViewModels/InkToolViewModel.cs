@@ -283,6 +283,8 @@ public sealed class InkToolViewModel : ViewModelBase
         InkAlpha = (byte)Math.Clamp(s.InkAlpha, 20, 240);
         InkStyle = Math.Clamp(s.InkStyle, 0, 3);   // 笔锋全局共享
         IsInkToShapeEnabled = s.IsInkToShapeEnabled;   // 墨迹纠正全局共享
+        _brushInkStyleEnabled = s.BrushInkStyleEnabled;             // 墨迹样式开关（直接装字段，下方 SetInkColor 统一重建 DA）
+        _highlighterInkStyleEnabled = s.HighlighterInkStyleEnabled;
         IsMultiFingerInk = s.IsMultiFingerInkEnabled;   // 多指书写随文档记忆（view_state）
         InkType = (InkPenType)Math.Clamp(s.InkType, 0, 2);
         switch (InkType)
@@ -355,6 +357,24 @@ public sealed class InkToolViewModel : ViewModelBase
         set => SetField(ref _isInkToShapeEnabled, value);
     }
 
+    private bool _brushInkStyleEnabled = true;
+
+    /// <summary>启用中国传统毛笔墨迹样式：硬笔/软笔墨迹点用斜向椭圆笔尖（关=普通圆点）。</summary>
+    public bool BrushInkStyleEnabled
+    {
+        get => _brushInkStyleEnabled;
+        set { if (SetField(ref _brushInkStyleEnabled, value)) ApplyCurrentColor(); }
+    }
+
+    private bool _highlighterInkStyleEnabled = true;
+
+    /// <summary>荧光笔启用荧光笔墨迹样式：荧光笔用竖长方形笔尖（关=圆形）。</summary>
+    public bool HighlighterInkStyleEnabled
+    {
+        get => _highlighterInkStyleEnabled;
+        set { if (SetField(ref _highlighterInkStyleEnabled, value)) ApplyCurrentColor(); }
+    }
+
     private bool _isUselightThemeColor = false;
 
     /// <summary>调色盘主题：true=亮系，false=暗系（切换时重算当前墨迹色；色块背景由 InkToolBar 重绘）。</summary>
@@ -367,6 +387,10 @@ public sealed class InkToolViewModel : ViewModelBase
                 ApplyCurrentColor();
         }
     }
+
+    /// <summary>毛笔样式笔尖压扁系数 / 旋转角：StylusTipTransform 构造与 UpdateInkCursor 笔尖光标共用（两处必须一致）。</summary>
+    public const double BrushTipSquash = 0.6;
+    public const double BrushTipAngleDeg = -52.5;
 
     /// <summary>按当前颜色索引重建 DrawingAttributes（画笔=实色+粗细；荧光笔=半透明+加粗+IsHighlighter）。
     /// 宽度除以页面缩放 DisplayScale 抵消整层 ScaleTransform 的放大——任何缩放（含 <100%）都屏幕恒定
@@ -383,14 +407,34 @@ public sealed class InkToolViewModel : ViewModelBase
             da.Color = Color.FromArgb(InkAlpha, c.R, c.G, c.B);
             da.IsHighlighter = true;
             da.IgnorePressure = true;   // 荧光笔屏蔽压感（等粗绘制）
-            da.Width = (30 + InkWidth * 2) / scale;   // 对齐 ICA：实际宽 = 30 + 滑块值（滑块值 = InkWidth）
-            da.Height = (30 + InkWidth * 2) / scale;
+            da.StylusTipTransform = Matrix.Identity;   // 荧光笔永不斜置（Clone 链会继承，必须显式复位）
+            da.Height = (30 + InkWidth * 2) / scale;   // 对齐 ICA：实际宽 = 30 + 滑块值（滑块值 = InkWidth）
+            if (_highlighterInkStyleEnabled)
+            {
+                da.StylusTip = StylusTip.Rectangle;   // 荧光笔竖长方体笔尖（方角矩形，固定竖直不随笔迹旋转）
+                da.Width = da.Height / 2;   // 宽 = 高的一半（1:2）：横画粗细不变、竖画变细，方向感类似真实荧光笔
+            }
+            else
+            {
+                da.StylusTip = StylusTip.Ellipse;   // 关=旧版圆形荧光笔
+                da.Width = da.Height;
+            }
         }
         else
         {
             da.Color = (IsUselightThemeColor ? PenLightColorMap : PenDarkColorMap)[InkColor];
             da.IsHighlighter = false;
             da.IgnorePressure = false;  // Clone 会带走上一次荧光笔的值，复位为 WPF 默认（跟随压感）
+            da.StylusTip = StylusTip.Ellipse;   // 复位为 WPF 默认圆点笔尖
+            if (_brushInkStyleEnabled)
+            {
+                Matrix tip = Matrix.Identity;   // 必须从 Identity 起算（default 零矩阵会退化）
+                tip.Scale(BrushTipSquash, 1.0);   // 横向压扁
+                tip.Rotate(BrushTipAngleDeg);     // 斜置（先压扁后旋转）
+                da.StylusTipTransform = tip;
+            }
+            else
+                da.StylusTipTransform = Matrix.Identity;   // 关=普通圆点
             da.Width = InkWidth / 2 / scale;
             da.Height = InkWidth / 2 / scale;
         }
