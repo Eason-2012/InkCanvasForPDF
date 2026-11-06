@@ -38,3 +38,15 @@
 <img width="1366" height="728" alt="image" src="https://github.com/user-attachments/assets/5b08f420-1813-4331-8de5-ecfe0135b248" />
 <img width="1366" height="728" alt="image" src="https://github.com/user-attachments/assets/b2ba53fb-96fe-4699-b0ee-0178de43c0a7" />
 <img width="1366" height="728" alt="image" src="https://github.com/user-attachments/assets/cdb6c282-07db-48f6-9874-2a5aca854c6b" />
+
+
+
+### ~~其实调色盘部分颜色是北京地铁标志色改的~~
+
+深色蓝为 **#004a9f** 大兴机场线标志色未调整
+
+深色紫为 **#793482** 5号线标志色调整后
+
+浅色粉为 **#fa61ae** 昌平线标志色调整后
+
+深色青为 **#30acb3** 17号线标志色调整后
