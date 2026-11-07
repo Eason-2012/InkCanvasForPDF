@@ -12,6 +12,7 @@ using System.Windows.Controls;
 using System.Windows.Ink;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using Point = System.Windows.Point;
 
 namespace InkCanvasForPDF.Board
@@ -293,6 +294,9 @@ namespace InkCanvasForPDF.Board
         InkCanvasEditingMode lastInkCanvasEditingMode = InkCanvasEditingMode.Ink;
         bool isSingleFingerDragMode = false;
         bool _eraseGestureBatchGuard;   // 双指手势防擦守卫：橡皮批处理只累积不提交，结束时统一回滚
+        private const long StrokeKeepMinAgeMs = 100;   // 同 PDF 侧规则：最早点 ≥100ms 才保留
+        private long _boardFirstTouchDownMs;           // 第一指落笔时刻（Environment.TickCount64，0=无）
+        private bool _gestureDiscardPending;           // 本手势要丢弃被中断的那一截（等收笔时删）
 
         /// <summary>双指手势成立时回滚橡皮批处理（CodeInput 门，不入撤销历史）：橡皮 + 双指缩放不留擦除痕迹。</summary>
         private void RevertEraseBatchForGesture()
@@ -334,6 +338,8 @@ namespace InkCanvasForPDF.Board
         private void inkCanvas_PreviewTouchDown(object sender, TouchEventArgs e)
         {
             dec.Add(e.TouchDevice.Id);
+            if (dec.Count == 1)
+                _boardFirstTouchDownMs = Environment.TickCount64;   // 第一指落笔时刻 = 在绘笔画最早点时刻
             //设备1个的时候，记录中心点
             if (dec.Count == 1)
             {
@@ -344,6 +350,15 @@ namespace InkCanvasForPDF.Board
             if (dec.Count > 1 || isSingleFingerDragMode || !Settings.Gesture.IsEnableTwoFingerGesture)
             {
                 if (isInMultiTouchMode || !Settings.Gesture.IsEnableTwoFingerGesture) return;
+                // 停墨保留规则（纯时间）：第一指已写够 100ms → 保留这一截（画板本就不删被中断笔画）；
+                // 太新（手指刚落下就上第二指）→ 等收笔时把这一截丢弃，不留残墨
+                if (dec.Count >= 2)
+                {
+                    _gestureDiscardPending = _boardFirstTouchDownMs != 0
+                        && Environment.TickCount64 - _boardFirstTouchDownMs < StrokeKeepMinAgeMs;
+                    if (_gestureDiscardPending)
+                        ConsoleLog.Write("画板双指手势", $"中断笔画过短丢弃: 存在={Environment.TickCount64 - _boardFirstTouchDownMs}ms");
+                }
                 if (inkCanvas.EditingMode != InkCanvasEditingMode.None && inkCanvas.EditingMode != InkCanvasEditingMode.Select)
                 {
                     lastInkCanvasEditingMode = inkCanvas.EditingMode;
@@ -377,6 +392,19 @@ namespace InkCanvasForPDF.Board
                 inkCanvas.EraserShape = forcePointEraser
                     ? new RectangleStylusShape(EraserDiameter, InkCircleCursor.EraserBoardHeight(EraserDiameter))
                     : new EllipseStylusShape(5, 5);   // 恢复真实橡皮形状（同 Main_Grid_TouchDown 公式）
+            }
+            // 延迟清标记：被中断的那一笔在本 Preview 之后才由 InkCanvas 输入管线提交，
+            // 立即清会让"丢弃"守卫漏删（同 PDF 侧 Background 手法）
+            if (dec.Count == 0)
+            {
+                Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+                {
+                    if (dec.Count == 0)   // 期间已开始新一笔则不清，避免误杀
+                    {
+                        _gestureDiscardPending = false;
+                        _boardFirstTouchDownMs = 0;
+                    }
+                }));
             }
         }
         private void inkCanvas_ManipulationStarting(object sender, ManipulationStartingEventArgs e)

@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Ink;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using InkCanvasForPDF.Services;
 using InkCanvasForPDF.ViewModels;
@@ -329,6 +330,9 @@ public partial class MainWindow : Window
         // 形状笔画必须关闭墨迹平滑：FitToCurve 会把矩形等少量点的闭合几何拟合成圆角曲线（矩形只剩 5 点）
         var defaultAttributes = _viewModel.InkTool.DrawingAttributes.Clone();
         defaultAttributes.FitToCurve = false;
+        // 图形一律用普通圆点笔尖：不套用毛笔斜椭圆 / 荧光笔长方形（荧光笔的半透明与加粗保留）
+        defaultAttributes.StylusTip = StylusTip.Ellipse;
+        defaultAttributes.StylusTipTransform = Matrix.Identity;
         List<Point> pointList;
         StylusPointCollection point;
         Stroke stroke;

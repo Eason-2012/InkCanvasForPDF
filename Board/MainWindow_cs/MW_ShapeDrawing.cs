@@ -481,6 +481,9 @@ namespace InkCanvasForPDF.Board
             {
                 var da = inkCanvas.DefaultDrawingAttributes.Clone();
                 da.FitToCurve = false;
+                // 图形一律用普通圆点笔尖：不套用毛笔斜椭圆 / 荧光笔长方形（荧光笔的半透明与加粗保留）
+                da.StylusTip = StylusTip.Ellipse;
+                da.StylusTipTransform = Matrix.Identity;
                 return da;
             }
         }

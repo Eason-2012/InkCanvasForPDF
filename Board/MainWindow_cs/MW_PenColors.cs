@@ -53,6 +53,7 @@ namespace InkCanvasForPDF.Board
                 drawingAttributes.Height = ((Slider)sender).Value / 2;
                 drawingAttributes.Width = ((Slider)sender).Value / 2;
             }
+            ApplyInkCursor();   // 画笔粗细变化不经 CheckColorTheme，须单独刷新笔尖光标
             SaveSettingsToFile();
         }
 
@@ -307,6 +308,7 @@ namespace InkCanvasForPDF.Board
                     drawingAttributes.IgnorePressure = false;  // 复位为 WPF 默认（跟随压感）
                 }
                 RefreshTimePressureArmed();   // 颜色/荧光笔档位切换影响时间笔锋武装状态（inkColor>100 豁免）
+                ApplyInkCursor();   // 颜色/粗细/笔尖样式（含荧光笔页签、两个墨迹样式开关）变化即时刷新笔尖光标
             }
 
             // 改变选中提示
@@ -523,7 +525,7 @@ namespace InkCanvasForPDF.Board
 
         /// <summary>切换画板墨迹类型（0=硬笔 1=软笔 2=荧光笔）：装入该类型记忆的粗细（硬/软笔共用）与记忆色
         /// （同 PDF 打开恢复）；硬/软笔记忆色仅在存储值非法（0~8 外）或与画布同色不可见（白板存白 5、黑板存黑 0）
-        /// 时按画布取反兜底（白底黑笔、黑底白笔），切页签不覆盖；荧光笔装入记忆色（本就不受画布影响）；
+        /// 时按画布取反兜底（白底深色红笔、黑底白笔），切页签不覆盖；荧光笔装入记忆色（本就不受画布影响）；
         /// 压感随硬/软笔切换（荧光笔保持上次值，其本身豁免时间笔锋武装）。调用方随后 CheckColorTheme 刷新 UI。</summary>
         private void ApplyBoardInkType(int type)
         {
@@ -547,7 +549,7 @@ namespace InkCanvasForPDF.Board
                     || (Settings.Canvas.UsingWhiteboard && stored == 5)
                     || (!Settings.Canvas.UsingWhiteboard && stored == 0);
                 inkColor = invisible
-                    ? (Settings.Canvas.UsingWhiteboard ? 0 : 5)   // 白底黑笔、黑底白笔兜底
+                    ? (Settings.Canvas.UsingWhiteboard ? 1 : 5)   // 白底深色红笔（暗系红 #DC2626）、黑底白笔兜底
                     : stored;                                     // 恢复记忆色（同 PDF）
                 lastBoardInkColor = inkColor;
             }

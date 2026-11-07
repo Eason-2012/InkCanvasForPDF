@@ -22,6 +22,18 @@ namespace InkCanvasForPDF.Board
             {
                 inkCanvas.Opacity = 1;
 
+                // 双指手势停墨：被中断的那一截太新（<100ms）→ 收笔后整笔丢弃（CodeInput 门，不入撤销历史）；
+                // 够久的保留，继续走下方正常收笔处理（笔锋/纠错/时间笔锋定格）
+                if (_gestureDiscardPending && sender is InkCanvas discCanvas && discCanvas.Strokes.Contains(e.Stroke))
+                {
+                    _gestureDiscardPending = false;
+                    var savedCommitType = _currentCommitType;
+                    _currentCommitType = CommitReason.CodeInput;
+                    try { discCanvas.Strokes.Remove(e.Stroke); }
+                    finally { _currentCommitType = savedCommitType; }
+                    return;
+                }
+
                 if (inkColor > 100)
                 { // 荧光笔功能（画板以 inkColor>100 判别）不参与笔锋
                     return;
@@ -105,10 +117,11 @@ namespace InkCanvasForPDF.Board
                             int n = e.Stroke.StylusPoints.Count - 1;
                             double pressure = 0.1;
                             int x = 10;
-                            if (n == 1)
+                            if (n <= 1)
                             {
-                                // 2 点笔画不改写；压感关闭时仍需归一 0.5（等价原"flatten 先行"语义，
-                                // 其余点数由下方重建统一覆盖，无需前置 flatten）
+                                // 1~2 点笔画（含原地点击的单点圆点）不改写；压感关闭时仍需归一 0.5
+                                // （等价原"flatten 先行"语义，其余点数由下方重建统一覆盖，无需前置 flatten）
+                                // n == 0 必须在此早退：下方 0.4 * (n - i) / n 会除零得到 NaN
                                 if (!_pressureEnabled)
                                 {
                                     StylusPointCollection flattened2 = new StylusPointCollection();

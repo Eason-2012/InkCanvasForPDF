@@ -48,6 +48,10 @@
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="Bd" Property="Background" Value="{DynamicResource PressedBackgroundBrush}"/>
                             </Trigger>
+                            <!-- 禁用态灰置（打印弹窗预览翻页到首/末张时按钮变灰；图标内联写死前景色，故用 Opacity 统一压暗） -->
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.4"/>
+                            </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -279,17 +283,17 @@
                                            Foreground="{DynamicResource ToolbarForegroundBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Grid>
                     </Button>
-                    <Button Style="{StaticResource IconButton}" Click="RotateCounterClockwiseButton_Click" ToolTip="逆时针旋转"
-                            IsEnabled="{Binding HasPdf}">
-                        <Grid Width="32" Height="32">
-                            <ic:FluentIcon Icon="ArrowRotateCounterclockwise" IconVariant="Regular" FontSize="24"
-                                           Foreground="{DynamicResource ToolbarForegroundBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Grid>
-                    </Button>
                     <Button Style="{StaticResource IconButton}" Click="RotateClockwiseButton_Click" ToolTip="顺时针旋转"
                             IsEnabled="{Binding HasPdf}">
                         <Grid Width="32" Height="32">
                             <ic:FluentIcon Icon="ArrowRotateClockwise" IconVariant="Regular" FontSize="24"
+                                           Foreground="{DynamicResource ToolbarForegroundBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+                    </Button>
+                    <Button Style="{StaticResource IconButton}" Click="RotateCounterClockwiseButton_Click" ToolTip="逆时针旋转"
+                            IsEnabled="{Binding HasPdf}">
+                        <Grid Width="32" Height="32">
+                            <ic:FluentIcon Icon="ArrowRotateCounterclockwise" IconVariant="Regular" FontSize="24"
                                            Foreground="{DynamicResource ToolbarForegroundBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Grid>
                     </Button>

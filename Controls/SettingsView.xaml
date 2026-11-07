@@ -240,6 +240,130 @@
                     </StackPanel>
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                         <ikw:SimpleStackPanel Spacing="4" Margin="0,0,24,24">
+                            <ui:SettingsExpander Header="默认选项" IsExpanded="False">
+                                <ui:SettingsExpander.HeaderIcon>
+                                    <ic:FluentIcon Icon="Options" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsExpander.HeaderIcon>
+                                <ui:SettingsExpander.Items>
+                            <ui:SettingsCard Header="笔模式">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="Pen" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ComboBox x:Name="ComboBoxDefaultPdfPenMode"
+                                          MinWidth="130" HorizontalAlignment="Right"
+                                          SelectedIndex="{Binding Settings.DefaultPdfPenMode, Mode=TwoWay}"
+                                          SelectionChanged="ComboBoxDefaultPdfPenMode_SelectionChanged">
+                                    <ComboBoxItem Content="硬笔"/>
+                                    <ComboBoxItem Content="软笔"/>
+                                    <ComboBoxItem Content="荧光笔"/>
+                                </ComboBox>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="多指书写">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="HandLeft" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ui:ToggleSwitch x:Name="ToggleDefaultPdfMultiFinger"
+                                                 IsOn="{Binding Settings.DefaultPdfMultiFinger, Mode=TwoWay}"
+                                                 OffContent="关" OnContent="开"
+                                                 Toggled="DefaultOptionToggle_Toggled"/>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="笔粗细">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="Signature" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="16"
+                                               Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="12,0,0,0" MinWidth="40"
+                                               TextAlignment="Right">
+                                        <Run x:Name="DefaultPdfPenWidthValue" Text="5"/>
+                                    </TextBlock>
+                                    <Slider x:Name="SliderDefaultPdfPenWidth"
+                                            Minimum="1" Maximum="30" TickFrequency="1" IsSnapToTickEnabled="True"
+                                            Width="220"
+                                            ValueChanged="SliderDefaultPdfPenWidth_ValueChanged"/>
+                                </DockPanel>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard x:Name="CardDefaultPdfAlpha" Header="不透明度" Visibility="Collapsed">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="Blur" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="16"
+                                               Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="12,0,0,0" MinWidth="40"
+                                               TextAlignment="Right">
+                                        <Run x:Name="DefaultPdfAlphaValue" Text="120"/>
+                                    </TextBlock>
+                                    <Slider x:Name="SliderDefaultPdfAlpha"
+                                            Minimum="20" Maximum="240" TickFrequency="20" IsSnapToTickEnabled="True"
+                                            Width="220"
+                                            ValueChanged="SliderDefaultPdfAlpha_ValueChanged"/>
+                                </DockPanel>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="笔颜色">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="Color" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ComboBox x:Name="ComboBoxDefaultPdfPenColor"
+                                          MinWidth="130" HorizontalAlignment="Right"
+                                          SelectionChanged="ComboBoxDefaultPdfPenColor_SelectionChanged"/>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="橡皮模式">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="Eraser" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ComboBox x:Name="ComboBoxDefaultEraserModePdf"
+                                          MinWidth="130" HorizontalAlignment="Right"
+                                          SelectedIndex="{Binding Settings.DefaultPdfEraserMode, Mode=TwoWay}"
+                                          SelectionChanged="DefaultPdfEraserMode_SelectionChanged">
+                                    <ComboBoxItem Content="面积擦"/>
+                                    <ComboBoxItem Content="墨迹擦"/>
+                                </ComboBox>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard x:Name="CardDefaultEraserSizePdf" Header="橡皮粗细">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="SquareEraser" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="16"
+                                               Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="12,0,0,0" MinWidth="40"
+                                               TextAlignment="Right">
+                                        <Run x:Name="DefaultEraserSizeValuePdf" Text="10"/>
+                                    </TextBlock>
+                                    <Slider x:Name="SliderDefaultEraserSizePdf"
+                                            Minimum="1" Maximum="30" TickFrequency="1" IsSnapToTickEnabled="True"
+                                            Width="220"
+                                            ValueChanged="DefaultPdfEraserSizeSlider_ValueChanged"/>
+                                </DockPanel>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="固定图形菜单">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="Pin" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ui:ToggleSwitch x:Name="ToggleDefaultPdfShapePinned"
+                                                 IsOn="{Binding Settings.DefaultPdfShapePinned, Mode=TwoWay}"
+                                                 OffContent="关" OnContent="开"
+                                                 Toggled="DefaultOptionToggle_Toggled"/>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="展开缩略图">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="DocumentPdf" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ui:ToggleSwitch x:Name="ToggleDefaultPdfThumbnailOpen"
+                                                 IsOn="{Binding Settings.DefaultPdfThumbnailOpen, Mode=TwoWay}"
+                                                 OffContent="关" OnContent="开"
+                                                 Toggled="DefaultOptionToggle_Toggled"/>
+                            </ui:SettingsCard>
+                                </ui:SettingsExpander.Items>
+                            </ui:SettingsExpander>
+
                             <ui:SettingsExpander Header="墨迹栏" IsExpanded="True">
                                 <ui:SettingsExpander.HeaderIcon>
                                     <ic:FluentIcon Icon="PanelBottom" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
@@ -375,6 +499,153 @@
                     </StackPanel>
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                         <ikw:SimpleStackPanel Spacing="4" Margin="0,0,24,24">
+                            <ui:SettingsExpander Header="默认选项" IsExpanded="False">
+                                <ui:SettingsExpander.HeaderIcon>
+                                    <ic:FluentIcon Icon="Options" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsExpander.HeaderIcon>
+                                <ui:SettingsExpander.Items>
+                            <ui:SettingsCard Header="笔模式">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="Pen" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ComboBox x:Name="ComboBoxDefaultBoardPenMode"
+                                          MinWidth="130" HorizontalAlignment="Right"
+                                          SelectedIndex="{Binding Settings.Board.Defaults.PenKind, Mode=TwoWay}"
+                                          SelectionChanged="ComboBoxDefaultBoardPenMode_SelectionChanged">
+                                    <ComboBoxItem Content="硬笔"/>
+                                    <ComboBoxItem Content="软笔"/>
+                                    <ComboBoxItem Content="荧光笔"/>
+                                </ComboBox>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="笔粗细">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="Signature" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="16"
+                                               Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="12,0,0,0" MinWidth="40"
+                                               TextAlignment="Right">
+                                        <Run x:Name="DefaultBoardPenWidthValue" Text="5"/>
+                                    </TextBlock>
+                                    <Slider x:Name="SliderDefaultBoardPenWidth"
+                                            Minimum="1" Maximum="30" TickFrequency="1" IsSnapToTickEnabled="True"
+                                            Width="220"
+                                            ValueChanged="SliderDefaultBoardPenWidth_ValueChanged"/>
+                                </DockPanel>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard x:Name="CardDefaultBoardAlpha" Header="不透明度" Visibility="Collapsed">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="Blur" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="16"
+                                               Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="12,0,0,0" MinWidth="40"
+                                               TextAlignment="Right">
+                                        <Run x:Name="DefaultBoardAlphaValue" Text="140"/>
+                                    </TextBlock>
+                                    <Slider x:Name="SliderDefaultBoardAlpha"
+                                            Minimum="20" Maximum="240" TickFrequency="20" IsSnapToTickEnabled="True"
+                                            Width="220"
+                                            ValueChanged="SliderDefaultBoardAlpha_ValueChanged"/>
+                                </DockPanel>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="橡皮模式">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="Eraser" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ComboBox x:Name="ComboBoxDefaultEraserModeBoard"
+                                          MinWidth="130" HorizontalAlignment="Right"
+                                          SelectedIndex="{Binding Settings.Board.Defaults.EraserMode, Mode=TwoWay}"
+                                          SelectionChanged="DefaultBoardEraserMode_SelectionChanged">
+                                    <ComboBoxItem Content="面积擦"/>
+                                    <ComboBoxItem Content="墨迹擦"/>
+                                </ComboBox>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard x:Name="CardDefaultEraserSizeBoard" Header="橡皮粗细">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="SquareEraser" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="16"
+                                               Foreground="{DynamicResource ToolbarForegroundBrush}" Margin="12,0,0,0" MinWidth="40"
+                                               TextAlignment="Right">
+                                        <Run x:Name="DefaultEraserSizeValueBoard" Text="10"/>
+                                    </TextBlock>
+                                    <Slider x:Name="SliderDefaultEraserSizeBoard"
+                                            Minimum="1" Maximum="30" TickFrequency="1" IsSnapToTickEnabled="True"
+                                            Width="220"
+                                            ValueChanged="DefaultBoardEraserSizeSlider_ValueChanged"/>
+                                </DockPanel>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="固定图形菜单">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="Pin" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ui:ToggleSwitch x:Name="ToggleDefaultBoardShapePinned"
+                                                 IsOn="{Binding Settings.Board.Defaults.ShapePinned, Mode=TwoWay}"
+                                                 OffContent="关" OnContent="开"
+                                                 Toggled="DefaultOptionToggle_Toggled"/>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="画布默认颜色">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="Color" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ComboBox x:Name="ComboBoxDefaultBoardCanvas"
+                                          MinWidth="130" HorizontalAlignment="Right"
+                                          SelectionChanged="ComboBoxDefaultBoardCanvas_SelectionChanged">
+                                    <ComboBoxItem Content="黑板"/>
+                                    <ComboBoxItem Content="白板"/>
+                                </ComboBox>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="多指书写">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="HandLeft" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ui:ToggleSwitch x:Name="ToggleDefaultBoardMultiTouch"
+                                                 IsOn="{Binding Settings.Board.Defaults.MultiTouch, Mode=TwoWay}"
+                                                 OffContent="关" OnContent="开"
+                                                 Toggled="DefaultOptionToggle_Toggled"/>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="双指移动">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="ArrowMove" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ui:ToggleSwitch x:Name="ToggleDefaultBoardTwoFingerPan"
+                                                 IsOn="{Binding Settings.Board.Defaults.TwoFingerPan, Mode=TwoWay}"
+                                                 OffContent="关" OnContent="开"
+                                                 Toggled="DefaultOptionToggle_Toggled"/>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="双指缩放">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="ZoomIn" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ui:ToggleSwitch x:Name="ToggleDefaultBoardTwoFingerZoom"
+                                                 IsOn="{Binding Settings.Board.Defaults.TwoFingerZoom, Mode=TwoWay}"
+                                                 OffContent="关" OnContent="开"
+                                                 Toggled="DefaultOptionToggle_Toggled"/>
+                            </ui:SettingsCard>
+
+                            <ui:SettingsCard Header="双指旋转">
+                                <ui:SettingsCard.HeaderIcon>
+                                    <ic:FluentIcon Icon="ArrowRotateClockwise" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                </ui:SettingsCard.HeaderIcon>
+                                <ui:ToggleSwitch x:Name="ToggleDefaultBoardTwoFingerRotate"
+                                                 IsOn="{Binding Settings.Board.Defaults.TwoFingerRotate, Mode=TwoWay}"
+                                                 OffContent="关" OnContent="开"
+                                                 Toggled="DefaultOptionToggle_Toggled"/>
+                            </ui:SettingsCard>
+                                </ui:SettingsExpander.Items>
+                            </ui:SettingsExpander>
+
                             <ui:SettingsExpander Header="墨迹栏" IsExpanded="True">
                                 <ui:SettingsExpander.HeaderIcon>
                                     <ic:FluentIcon Icon="PanelBottom" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>

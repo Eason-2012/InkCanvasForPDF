@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using InkCanvasForPDF.Services;
 using InkCanvasForPDF.ViewModels;
@@ -42,6 +43,20 @@ public partial class SettingsView : System.Windows.Controls.UserControl
 
     /// <summary>"选择笔锋样式"下拉框索引 → InkStyle 内部值（时间笔锋显示在第一位，但内部值仍为 3，兼容已保存的设置）。</summary>
     private static readonly int[] PenStyleMap = { 3, 0, 1, 2 };
+
+    /// <summary>默认选项回填期间的重入守卫（程序化赋 SelectedIndex/Value 时不写回设置）。</summary>
+    private bool _syncingDefaultOptions;
+
+    /// <summary>画笔色下拉 18 档显示名（偶数=浅色/亮系，奇数=深色/暗系；暗系粉按「深色紫」显示）。</summary>
+    private static readonly string[] DefaultPenColorNames =
+    {
+        "浅色黑", "深色黑", "浅色红", "深色红", "浅色绿", "深色绿", "浅色蓝", "深色蓝",
+        "浅色黄", "深色黄", "浅色白", "深色白", "浅色粉", "深色紫", "浅色青", "深色青",
+        "浅色橙", "深色橙"
+    };
+
+    /// <summary>荧光笔色下拉 6 档（索引 101~106）。</summary>
+    private static readonly string[] DefaultHighlighterColorNames = { "红", "橙", "黄", "青", "蓝", "紫" };
 
     /// <summary>PDF 墨迹栏 / 黑板墨迹栏布局设置（缩放/边距/背景色）变更时触发（由 MainWindow 应用并转发 BoardView）。</summary>
     public event Action? BarLayoutChanged;
@@ -114,6 +129,10 @@ public partial class SettingsView : System.Windows.Controls.UserControl
                 // 清空墨迹自动切换模式：PDF/画板默认 2（墨迹），越界值按界回填。
                 ComboBoxPdfClearInkSwitchMode.SelectedIndex = Math.Clamp(vm.Settings.ClearInkAutoSwitchMode, 0, 3);
                 ComboBoxBoardClearInkSwitchMode.SelectedIndex = Math.Clamp(vm.Settings.BoardClearInkAutoSwitchMode, 0, 3);
+                // 默认选项（PDF 阅读 / 画板书写）：笔模式/粗细/不透明度/颜色/橡皮/开头项回填
+                RefreshDefaultPdfControls();
+                RefreshDefaultBoardControls();
+                UpdateDefaultEraserSizeVisibility();
                 ApplyUpdateState();
             }
         };
@@ -301,7 +320,9 @@ public partial class SettingsView : System.Windows.Controls.UserControl
             var uri = new Uri("pack://application:,,,/Resources/dependencies.g.json");
             using var stream = Application.GetResourceStream(uri)!.Stream;
             using var reader = new StreamReader(stream);
-            if (JsonNode.Parse(reader.ReadToEnd()) is not JsonArray arr)
+            // 容忍尾随逗号，防止清单被工具再次生成出尾随逗号时解析失败
+            var opts = new JsonDocumentOptions { AllowTrailingCommas = true };
+            if (JsonNode.Parse(reader.ReadToEnd(), documentOptions: opts) is not JsonArray arr)
                 return new List<(string Name, string Url)>();
 
             var list = new List<(string Name, string Url)>();
@@ -955,5 +976,255 @@ public partial class SettingsView : System.Windows.Controls.UserControl
             dialog.Content = ChangelogMarkdownView.CreatePlainTextFallback(
                 "获取更新日志失败：可能无法连接到 GitHub。");
         }
+    }
+
+    // ────────── 默认选项（PDF 阅读 / 画板书写）──────────
+
+    /// <summary>PDF 默认选项回填：颜色下拉按笔模式重建、粗细/不透明度按对应记忆槽回填、显隐联动。</summary>
+    private void RefreshDefaultPdfControls()
+    {
+        if (Vm is not { } vm) return;
+        int mode = Math.Clamp(vm.Settings.DefaultPdfPenMode, 0, 2);
+        bool highlighter = mode == 2;
+        RefreshDefaultPdfPenColorItems();   // 内部按 mode 填 18 / 6 项并选中当前值
+        _syncingDefaultOptions = true;
+        SliderDefaultPdfPenWidth.Value = Math.Clamp(
+            highlighter ? vm.Settings.DefaultPdfHighlighterWidth : vm.Settings.DefaultPdfPenWidth, 1, 30);
+        SliderDefaultPdfAlpha.Value = Math.Clamp(vm.Settings.DefaultPdfHighlighterAlpha, 20, 240);
+        SliderDefaultEraserSizePdf.Value = Math.Clamp(vm.Settings.DefaultPdfEraserSize, 1, 30);
+        _syncingDefaultOptions = false;
+        DefaultPdfPenWidthValue.Text = ((int)SliderDefaultPdfPenWidth.Value).ToString();
+        DefaultPdfAlphaValue.Text = ((int)SliderDefaultPdfAlpha.Value).ToString();
+        DefaultEraserSizeValuePdf.Text = ((int)SliderDefaultEraserSizePdf.Value).ToString();
+        CardDefaultPdfAlpha.Visibility = highlighter ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>按默认笔模式重建 PDF 笔颜色下拉（硬笔/软笔=18 档，荧光笔=6 档）并选中记忆值。</summary>
+    private void RefreshDefaultPdfPenColorItems()
+    {
+        if (Vm is not { } vm) return;
+        _syncingDefaultOptions = true;
+        ComboBoxDefaultPdfPenColor.Items.Clear();
+        if (vm.Settings.DefaultPdfPenMode == 2)
+        {
+            foreach (var n in DefaultHighlighterColorNames) ComboBoxDefaultPdfPenColor.Items.Add(n);
+            ComboBoxDefaultPdfPenColor.SelectedIndex = Math.Clamp(vm.Settings.DefaultPdfHighlighterColor - 101, 0, 5);
+        }
+        else
+        {
+            foreach (var n in DefaultPenColorNames) ComboBoxDefaultPdfPenColor.Items.Add(n);
+            int color = Math.Clamp(vm.Settings.DefaultPdfPenColor, 0, 8);
+            ComboBoxDefaultPdfPenColor.SelectedIndex = color * 2 + (vm.Settings.DefaultPdfColorLightTheme ? 0 : 1);
+        }
+        _syncingDefaultOptions = false;
+    }
+
+    /// <summary>画板默认选项回填（笔模式/粗细/不透明度/画布颜色）。</summary>
+    private void RefreshDefaultBoardControls()
+    {
+        if (Vm is not { } vm) return;
+        var d = vm.Settings.Board.Defaults;
+        _syncingDefaultOptions = true;
+        SliderDefaultBoardPenWidth.Value = Math.Clamp(
+            (d.PenKind == 2 ? d.HighlighterWidth : d.PenWidth) * 2, 1, 30);
+        SliderDefaultBoardAlpha.Value = Math.Clamp(d.HighlighterAlpha, 20, 240);
+        SliderDefaultEraserSizeBoard.Value = Math.Clamp(d.EraserSize, 1, 30);
+        ComboBoxDefaultBoardCanvas.SelectedIndex = vm.Settings.Board.Canvas.UsingWhiteboard ? 1 : 0;
+        _syncingDefaultOptions = false;
+        DefaultBoardPenWidthValue.Text = ((int)SliderDefaultBoardPenWidth.Value).ToString();
+        DefaultBoardAlphaValue.Text = ((int)SliderDefaultBoardAlpha.Value).ToString();
+        DefaultEraserSizeValueBoard.Text = ((int)SliderDefaultEraserSizeBoard.Value).ToString();
+        CardDefaultBoardAlpha.Visibility = d.PenKind == 2 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>橡皮粗细卡片：PDF / 画板各自按自己的橡皮模式判定（仅在面积擦=0 时显示）。</summary>
+    private void UpdateDefaultEraserSizeVisibility()
+    {
+        if (Vm is not { } vm) return;
+        CardDefaultEraserSizePdf.Visibility =
+            vm.Settings.DefaultPdfEraserMode == 0 ? Visibility.Visible : Visibility.Collapsed;
+        CardDefaultEraserSizeBoard.Visibility =
+            vm.Settings.Board.Defaults.EraserMode == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>默认笔模式切换：写设置 → 重建颜色下拉 → 按新模式重载粗细/不透明度 → 显隐联动。</summary>
+    private void ComboBoxDefaultPdfPenMode_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingDefaultOptions || Vm is not { } vm || ComboBoxDefaultPdfPenMode.SelectedIndex < 0)
+            return;
+        int mode = Math.Clamp(ComboBoxDefaultPdfPenMode.SelectedIndex, 0, 2);
+        if (vm.Settings.DefaultPdfPenMode != mode)
+        {
+            vm.Settings.DefaultPdfPenMode = mode;
+            SettingsService.Save(vm.Settings);
+        }
+        RefreshDefaultPdfControls();
+    }
+
+    /// <summary>默认笔颜色：硬笔/软笔写 18 档（色号 + 调色盘主题），荧光笔写 6 档荧光笔色。</summary>
+    private void ComboBoxDefaultPdfPenColor_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingDefaultOptions || Vm is not { } vm) return;
+        int idx = ComboBoxDefaultPdfPenColor.SelectedIndex;
+        if (idx < 0) return;
+        if (vm.Settings.DefaultPdfPenMode == 2)
+        {
+            int hc = 101 + Math.Clamp(idx, 0, 5);
+            if (vm.Settings.DefaultPdfHighlighterColor == hc) return;
+            vm.Settings.DefaultPdfHighlighterColor = hc;
+        }
+        else
+        {
+            int color = Math.Clamp(idx / 2, 0, 8);
+            bool light = idx % 2 == 0;   // 偶数=浅色（亮系），奇数=深色（暗系）
+            if (vm.Settings.DefaultPdfPenColor == color && vm.Settings.DefaultPdfColorLightTheme == light)
+                return;
+            vm.Settings.DefaultPdfPenColor = color;
+            vm.Settings.DefaultPdfColorLightTheme = light;
+        }
+        SettingsService.Save(vm.Settings);
+    }
+
+    /// <summary>默认笔粗细：荧光笔时写荧光笔粗细，否则写硬笔/软笔粗细。</summary>
+    private void SliderDefaultPdfPenWidth_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_syncingDefaultOptions || Vm is not { } vm) return;
+        double width = Math.Clamp((int)Math.Round(e.NewValue), 1, 30);
+        DefaultPdfPenWidthValue.Text = width.ToString("0");
+        if (vm.Settings.DefaultPdfPenMode == 2)
+        {
+            if (Math.Abs(vm.Settings.DefaultPdfHighlighterWidth - width) < 0.001) return;
+            vm.Settings.DefaultPdfHighlighterWidth = width;
+        }
+        else
+        {
+            if (Math.Abs(vm.Settings.DefaultPdfPenWidth - width) < 0.001) return;
+            vm.Settings.DefaultPdfPenWidth = width;
+        }
+        SettingsService.Save(vm.Settings);
+    }
+
+    /// <summary>默认荧光笔不透明度（20~240）。</summary>
+    private void SliderDefaultPdfAlpha_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_syncingDefaultOptions || Vm is not { } vm) return;
+        int alpha = Math.Clamp((int)Math.Round(e.NewValue), 20, 240);
+        DefaultPdfAlphaValue.Text = alpha.ToString();
+        if (vm.Settings.DefaultPdfHighlighterAlpha == alpha) return;
+        vm.Settings.DefaultPdfHighlighterAlpha = alpha;
+        SettingsService.Save(vm.Settings);
+    }
+
+    /// <summary>画板默认笔模式切换：写设置 → 按新模式重载粗细滑块 → 不透明度显隐联动。</summary>
+    private void ComboBoxDefaultBoardPenMode_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingDefaultOptions || Vm is not { } vm || ComboBoxDefaultBoardPenMode.SelectedIndex < 0)
+            return;
+        int kind = Math.Clamp(ComboBoxDefaultBoardPenMode.SelectedIndex, 0, 2);
+        if (vm.Settings.Board.Defaults.PenKind != kind)
+        {
+            vm.Settings.Board.Defaults.PenKind = kind;
+            SettingsService.Save(vm.Settings);
+        }
+        RefreshDefaultBoardControls();
+    }
+
+    /// <summary>画板默认笔粗细：滑块值 1~30，存储 = 滑块值一半（荧光笔写荧光笔粗细）。</summary>
+    private void SliderDefaultBoardPenWidth_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_syncingDefaultOptions || Vm is not { } vm) return;
+        int slider = Math.Clamp((int)Math.Round(e.NewValue), 1, 30);
+        DefaultBoardPenWidthValue.Text = slider.ToString();
+        double half = slider / 2.0;
+        var d = vm.Settings.Board.Defaults;
+        if (d.PenKind == 2)
+        {
+            if (Math.Abs(d.HighlighterWidth - half) < 0.001) return;
+            d.HighlighterWidth = half;
+        }
+        else
+        {
+            if (Math.Abs(d.PenWidth - half) < 0.001) return;
+            d.PenWidth = half;
+        }
+        SettingsService.Save(vm.Settings);
+    }
+
+    /// <summary>画板默认荧光笔不透明度（20~240）。</summary>
+    private void SliderDefaultBoardAlpha_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_syncingDefaultOptions || Vm is not { } vm) return;
+        int alpha = Math.Clamp((int)Math.Round(e.NewValue), 20, 240);
+        DefaultBoardAlphaValue.Text = alpha.ToString();
+        var d = vm.Settings.Board.Defaults;
+        if (d.HighlighterAlpha == alpha) return;
+        d.HighlighterAlpha = alpha;
+        SettingsService.Save(vm.Settings);
+    }
+
+    /// <summary>画布默认颜色（黑板/白板）：写既有 board.canvas.usingWhiteboard，下一次进入画板生效。</summary>
+    private void ComboBoxDefaultBoardCanvas_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingDefaultOptions || Vm is not { } vm || ComboBoxDefaultBoardCanvas.SelectedIndex < 0)
+            return;
+        bool white = ComboBoxDefaultBoardCanvas.SelectedIndex == 1;
+        if (vm.Settings.Board.Canvas.UsingWhiteboard == white) return;
+        vm.Settings.Board.Canvas.UsingWhiteboard = white;
+        SettingsService.Save(vm.Settings);
+    }
+
+    /// <summary>PDF 默认橡皮模式：写 PDF 专属设置 → PDF 橡皮粗细卡片显隐联动（与画板独立）。</summary>
+    private void DefaultPdfEraserMode_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingDefaultOptions || Vm is not { } vm || sender is not ComboBox combo || combo.SelectedIndex < 0)
+            return;
+        if (vm.Settings.DefaultPdfEraserMode != combo.SelectedIndex)
+        {
+            vm.Settings.DefaultPdfEraserMode = combo.SelectedIndex;
+            SettingsService.Save(vm.Settings);
+        }
+        UpdateDefaultEraserSizeVisibility();
+    }
+
+    /// <summary>画板默认橡皮模式：写画板专属设置 → 画板橡皮粗细卡片显隐联动（与 PDF 独立）。</summary>
+    private void DefaultBoardEraserMode_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingDefaultOptions || Vm is not { } vm || sender is not ComboBox combo || combo.SelectedIndex < 0)
+            return;
+        if (vm.Settings.Board.Defaults.EraserMode != combo.SelectedIndex)
+        {
+            vm.Settings.Board.Defaults.EraserMode = combo.SelectedIndex;
+            SettingsService.Save(vm.Settings);
+        }
+        UpdateDefaultEraserSizeVisibility();
+    }
+
+    /// <summary>PDF 默认橡皮粗细（与画板独立）：刷新 PDF 数值提示并落盘。</summary>
+    private void DefaultPdfEraserSizeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_syncingDefaultOptions || Vm is not { } vm) return;
+        int size = Math.Clamp((int)Math.Round(e.NewValue), 1, 30);
+        DefaultEraserSizeValuePdf.Text = size.ToString();
+        if (vm.Settings.DefaultPdfEraserSize == size) return;
+        vm.Settings.DefaultPdfEraserSize = size;
+        SettingsService.Save(vm.Settings);
+    }
+
+    /// <summary>画板默认橡皮粗细（与 PDF 独立）：刷新画板数值提示并落盘。</summary>
+    private void DefaultBoardEraserSizeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_syncingDefaultOptions || Vm is not { } vm) return;
+        int size = Math.Clamp((int)Math.Round(e.NewValue), 1, 30);
+        DefaultEraserSizeValueBoard.Text = size.ToString();
+        if (vm.Settings.Board.Defaults.EraserSize == size) return;
+        vm.Settings.Board.Defaults.EraserSize = size;
+        SettingsService.Save(vm.Settings);
+    }
+
+    /// <summary>默认选项的开关类（固定图形菜单/缩略图/多指/双指）由绑定写值，此处只负责落盘。</summary>
+    private void DefaultOptionToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_syncingDefaultOptions || Vm is not { } vm) return;
+        SettingsService.Save(vm.Settings);
     }
 }

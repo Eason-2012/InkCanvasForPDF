@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Controls;
 
 namespace InkCanvasForPDF.Board
@@ -14,6 +14,7 @@ namespace InkCanvasForPDF.Board
             Settings.Canvas.InkAlpha = (int)((Slider)sender).Value;
             SaveSettingsToFile();
             CheckColorTheme();
+            ApplyInkCursor();   // 荧光笔透明度变化 → 笔尖光标颜色 alpha 跟随
         }
 
         private void BtnHighlighterColorRed_Click(object sender, RoutedEventArgs e)

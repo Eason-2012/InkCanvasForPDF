@@ -2,8 +2,10 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Ink;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -376,6 +378,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
 
     public MainViewModel()
     {
+        _pdf.ThumbnailInkProvider = GetThumbnailInk;   // 缩略图墨迹复合：渲染请求入队时采集该页笔画快照
         OpenPdfCommand = new RelayCommand(OpenPdf);
         ZoomInCommand = new RelayCommand(() => ZoomBy(ZoomStepFactor));
         ZoomOutCommand = new RelayCommand(() => ZoomBy(1.0 / ZoomStepFactor));
@@ -385,6 +388,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         OpenSettingsCommand = new RelayCommand(() => IsSettingsVisible = true);
         CloseSettingsCommand = new RelayCommand(() => IsSettingsVisible = false);
         Settings = SettingsService.Load();
+        ApplyDefaultInkOptions();   // 「默认选项」作为启动初始值（打开文档后由 ApplyDocumentMenuState 按文档记忆覆盖）
         InkTool.EraserSize = InkToolViewModel.EraserSizeFromSlider(Settings.EraserSizeSetting);   // 橡皮粗细设置 → 实际直径（15 + 3.5x），启动即生效
         InkTool.IsStrokeEraser = Settings.EraserModeByStrokeSetting;   // 橡皮模式（面积擦/墨迹擦）恢复
         // 恢复上次批注墨迹选项（LoadFromSettings：装入各类型记忆并按记忆页签类型装入活动值）
@@ -639,22 +643,27 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>文档打开时回读菜单记忆（per-PDF 墨迹库 view_state）：先把迁移字段重置为代码默认
+    /// <summary>把设置页「默认选项」写入运行期墨迹记忆字段（均 JsonIgnore，不入 Settings.json）。</summary>
+    private void ApplyDefaultInkOptions()
+    {
+        Settings.InkType = Math.Clamp(Settings.DefaultPdfPenMode, 0, 2);
+        Settings.PenColor = Settings.DefaultPdfPenColor;
+        Settings.PenWidth = Math.Clamp(Settings.DefaultPdfPenWidth, 1, 30);
+        Settings.HighlighterColor = Settings.DefaultPdfHighlighterColor;
+        Settings.HighlighterWidth = Math.Clamp(Settings.DefaultPdfHighlighterWidth, 1, 30);
+        Settings.InkAlpha = Math.Clamp(Settings.DefaultPdfHighlighterAlpha, 20, 240);
+        Settings.UseLightThemeColor = Settings.DefaultPdfColorLightTheme;
+        Settings.IsMultiFingerInkEnabled = Settings.DefaultPdfMultiFinger;
+        Settings.EraserSizeSetting = Math.Clamp(Settings.DefaultPdfEraserSize, 1, 30);
+        Settings.EraserModeByStrokeSetting = Settings.DefaultPdfEraserMode == 1;
+    }
+
+    /// <summary>文档打开时回读菜单记忆（per-PDF 墨迹库 view_state）：先把迁移字段重置为「默认选项」
     /// （防止继承上一个 PDF 的值，同 ZoomLevel 复位语义），再逐键覆盖，最后按构造函数同款顺序灌入 InkTool。
-    /// 键缺失/解析失败保留默认；无库文档（自动保存关闭）自然全走默认。</summary>
+    /// 键缺失/解析失败保留默认值；无库文档（自动保存关闭）自然全走默认。</summary>
     private void ApplyDocumentMenuState(IReadOnlyDictionary<string, string> viewState)
     {
-        var def = new AppSettings();
-        Settings.InkType = def.InkType;
-        Settings.PenColor = def.PenColor;
-        Settings.PenWidth = def.PenWidth;
-        Settings.HighlighterColor = def.HighlighterColor;
-        Settings.HighlighterWidth = def.HighlighterWidth;
-        Settings.InkAlpha = def.InkAlpha;
-        Settings.UseLightThemeColor = def.UseLightThemeColor;
-        Settings.IsMultiFingerInkEnabled = def.IsMultiFingerInkEnabled;
-        Settings.EraserSizeSetting = def.EraserSizeSetting;
-        Settings.EraserModeByStrokeSetting = def.EraserModeByStrokeSetting;
+        ApplyDefaultInkOptions();
 
         if (viewState.TryGetValue("pdf_ink_type", out var s1)
             && int.TryParse(s1, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v1))
@@ -1190,33 +1199,68 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
 
         // 渲染缺失的缩略图：后台线程渲染（并发受限、独立 reader），完成后 Dispatcher 更新 UI——
         // 避免大 PDF 打开/快速滚动时逐张阻塞 UI 线程。
-        // 渲染宽度取该页旋转后的显示宽 × DPI 系数：位图由 PDFium 原生旋转，旋转后宽度恒为 ThumbnailWidth。
         for (int i = startIndex; i <= endIndex; i++)
-        {
-            var thumb = Thumbnails[i];
-            if (thumb.Image != null || thumb.IsLoading)
-                continue;
-            thumb.IsLoading = true;
-            int index = i;
-            int rotation = thumb.Rotation;
-            int logicalWidth = thumb.Width;   // 旋转后显示宽（DIP）；完成回调据此校验方向/尺寸未变
-            int thumbW = (int)Math.Round(logicalWidth * Math.Max(1.0, _dpiScale));
-            _pdf.RenderThumbnailAsync(index, thumbW, rotation).ContinueWith(t =>
-            {
-                var img = t.Status == TaskStatus.RanToCompletion ? t.Result : null;
-                Application.Current?.Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
-                {
-                    thumb.IsLoading = false;
-                    // ReloadPages 可能已重建集合 / 该页旋转角已变：仅当模型与方向都未变才回填。
-                    if (img != null && index < Thumbnails.Count && ReferenceEquals(Thumbnails[index], thumb)
-                        && thumb.Rotation == rotation && thumb.Width == logicalWidth)
-                        thumb.Image = img;
-                }));
-            });
-        }
+            RequestThumbnail(i);
 
         _thumbLoadedStartIndex = startIndex;
         _thumbLoadedEndIndex = endIndex;
+    }
+
+    /// <summary>发起单页缩略图渲染（LoadThumbnails 与墨迹刷新共用）：非 force 时已有图/已在加载则跳过。
+    /// 渲染宽度取该页旋转后的显示宽 × DPI 系数；完成后校验模型/方向/尺寸未变才回填。</summary>
+    private void RequestThumbnail(int index, bool force = false)
+    {
+        var thumb = Thumbnails[index];
+        if (!force && (thumb.Image != null || thumb.IsLoading))
+            return;
+        thumb.IsLoading = true;
+        int rotation = thumb.Rotation;
+        int logicalWidth = thumb.Width;   // 旋转后显示宽（DIP）；完成回调据此校验方向/尺寸未变
+        int thumbW = (int)Math.Round(logicalWidth * Math.Max(1.0, _dpiScale));
+        _pdf.RenderThumbnailAsync(index, thumbW, rotation).ContinueWith(t =>
+        {
+            var img = t.Status == TaskStatus.RanToCompletion ? t.Result : null;
+            Application.Current?.Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+            {
+                thumb.IsLoading = false;
+                // ReloadPages 可能已重建集合 / 该页旋转角已变：仅当模型与方向都未变才回填。
+                if (img != null && index < Thumbnails.Count && ReferenceEquals(Thumbnails[index], thumb)
+                    && thumb.Rotation == rotation && thumb.Width == logicalWidth)
+                    thumb.Image = img;
+            }));
+        });
+    }
+
+    /// <summary>缩略图墨迹提供者（UI 线程调用）：引用数组快照；无墨迹返回 null 走纯 PDF 快路径。</summary>
+    private ThumbnailInk? GetThumbnailInk(int pageIndex)
+    {
+        if (pageIndex < 0 || pageIndex >= Pages.Count)
+            return null;
+        var page = Pages[pageIndex];
+        if (page.Strokes.Count == 0)
+            return null;
+        // 引用数组快照（非深拷贝）：UI 线程只复制引用，微秒级，滚动/刷新/恢复多页时不再顿挫。
+        // 后台绘制期间原集合可继续书写/撤销；快照内某笔恰被并发修改（点编辑/属性改，概率极低）
+        // 由渲染侧 try/catch 兜底返回 null，旧图仍显示，下次墨迹变更/滚动自愈。
+        var snap = page.Strokes.ToArray();
+        return new ThumbnailInk(snap, page.ContentWidth, page.ContentHeight);
+    }
+
+    /// <summary>一页墨迹变更后刷新缩略图：失效该页缓存；已加载/加载中的缩略图立即重新渲染（含墨迹），
+    /// 未加载的不动（后续滚动加载时自然带墨迹快照渲染）。</summary>
+    public void RefreshThumbnailInk(int pageIndex)
+    {
+        if (!HasPdf || pageIndex < 0 || pageIndex >= Thumbnails.Count)
+            return;
+        _pdf.InvalidateThumbnailInk(pageIndex);
+        var thumb = Thumbnails[pageIndex];
+        bool inLoadedRange = _thumbLoadedStartIndex >= 0
+            && pageIndex >= _thumbLoadedStartIndex && pageIndex <= _thumbLoadedEndIndex;
+        if (!inLoadedRange && thumb.Image == null && !thumb.IsLoading)
+            return;
+        // 不清旧图：旧请求已被失效完成为 null（不会回填），新图就位后直接替换——期间旧图保留，无空白闪烁。
+        // force 跳过守卫；若恰有新请求在途，RenderThumbnailAsync 的 inflight 去重共享同一任务，安全。
+        RequestThumbnail(pageIndex, force: true);
     }
 
     private void LoadPageImages(int firstVisibleIndex, int lastVisibleIndex, bool needHiInViewport)

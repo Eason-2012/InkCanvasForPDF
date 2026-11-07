@@ -1,5 +1,6 @@
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Windows.Ink;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
@@ -7,6 +8,9 @@ namespace InkCanvasForPDF.Services;
 
 /// <summary>页面渲染尺寸。</summary>
 public readonly record struct PageSize(int Width, int Height);
+
+/// <summary>缩略图墨迹快照（请求入队时在 UI 线程取引用数组快照——微秒级，本次请求只读，后台安全绘制）。</summary>
+public sealed record ThumbnailInk(Stroke[] Strokes, double CoordW, double CoordH);
 
 /// <summary>基于直接 PDFium 的位图渲染服务（引擎抄自 KillerPDF：PdfiumInterop 栅格化 +
 /// 后台线程 BitmapSource.Create+Freeze 烘焙 DPI；缩略图走 PdfiumInterop 渲染 + PNG→冻结 BitmapFrame）。
@@ -39,13 +43,19 @@ public sealed class PdfRenderService : IDisposable
     private const long ThumbPriorityBufferBase = 1_000_000;   // 缓冲区优先级基数（大于任何可见区优先级）
 
     private readonly object _thumbQueueLock = new();
-    private readonly PriorityQueue<(int Page, int Width, int Rotation), long> _thumbQueue = new();
+    private readonly PriorityQueue<(int Page, int Width, int Rotation, ThumbnailInk? Ink, int InkVer), long> _thumbQueue = new();
     private readonly Dictionary<long, TaskCompletionSource<ImageSource?>> _thumbInflight = new(); // 排队/渲染中的去重（键=(页,旋转)）
     private readonly SemaphoreSlim _thumbQueueSignal = new(0);
     private int _thumbFocusFirst = -1, _thumbFocusLast = -1;   // 当前可见区（滑动区域）
     private int _thumbWantStart = -1, _thumbWantEnd = -1;      // 期望范围（可见区±缓冲），超出丢弃
     private bool _thumbWorkersStarted;
     private int _cacheGeneration;   // 缓存代数：ClearCache/ClearBaseCache 时递增，丢弃在途渲染的过期写入
+
+    /// <summary>墨迹提供者：按页返回墨迹快照（无墨迹返回 null 走纯 PDF 快路径）。由 MainViewModel 挂接。</summary>
+    public Func<int, ThumbnailInk?>? ThumbnailInkProvider { get; set; }
+
+    /// <summary>页→缩略图墨迹版本号：墨迹变更失效时 +1，旧快照渲染结果据此挡在缓存外（_thumbQueueLock 保护）。</summary>
+    private readonly Dictionary<int, int> _thumbInkVersions = new();
 
     public int PageCount => _pageCount;
 
@@ -167,10 +177,13 @@ public sealed class PdfRenderService : IDisposable
         lock (_thumbQueueLock)
         {
             if (_thumbInflight.TryGetValue(key, out var existing))
-                return existing.Task;   // 去重：同页同旋转角不重复排队
+                return existing.Task;   // 去重：同页同旋转角不重复排队（命中不去快照）
+            // 墨迹快照（UI 线程 ToArray 引用复制，微秒级）：在去重检查后采集，随请求入队
+            var ink = ThumbnailInkProvider?.Invoke(pageIndex);
+            int inkVer = _thumbInkVersions.GetValueOrDefault(pageIndex);
             var tcs = new TaskCompletionSource<ImageSource?>(TaskCreationOptions.RunContinuationsAsynchronously);
             _thumbInflight[key] = tcs;
-            _thumbQueue.Enqueue((pageIndex, thumbWidth, rotation), ThumbPriority(pageIndex));
+            _thumbQueue.Enqueue((pageIndex, thumbWidth, rotation, ink, inkVer), ThumbPriority(pageIndex));
             _thumbQueueSignal.Release();
             StartThumbWorkersIfNeeded();
             return tcs.Task;
@@ -199,8 +212,8 @@ public sealed class PdfRenderService : IDisposable
             _thumbWantEnd = wantEnd;
 
             // 队列很小（可见区+缓冲 ≈ 十几项），全量出队→重排/丢弃，开销可忽略。
-            var keep = new List<((int Page, int Width, int Rotation), long)>();
-            while (_thumbQueue.TryDequeue(out (int Page, int Width, int Rotation) item, out _))
+            var keep = new List<((int Page, int Width, int Rotation, ThumbnailInk? Ink, int InkVer), long)>();
+            while (_thumbQueue.TryDequeue(out var item, out _))
             {
                 if (item.Page >= _thumbWantStart && item.Page <= _thumbWantEnd)
                     keep.Add((item, ThumbPriority(item.Page)));
@@ -231,7 +244,7 @@ public sealed class PdfRenderService : IDisposable
             try
             {
                 await _thumbQueueSignal.WaitAsync().ConfigureAwait(false);
-                (int Page, int Width, int Rotation) item = default;
+                (int Page, int Width, int Rotation, ThumbnailInk? Ink, int InkVer) item = default;
                 TaskCompletionSource<ImageSource?>? tcs = null;
                 lock (_thumbQueueLock)
                 {
@@ -252,7 +265,7 @@ public sealed class PdfRenderService : IDisposable
                     continue;   // 空唤醒：继续等下一次
 
                 ImageSource? img = null;
-                try { img = RenderThumbnailCore(item.Page, item.Width, item.Rotation); }
+                try { img = RenderThumbnailCore(item.Page, item.Width, item.Rotation, item.Ink, item.InkVer); }
                 catch (Exception ex) { App.Log($"RenderThumbnail p{item.Page}", ex); }
 
                 lock (_thumbQueueLock)
@@ -269,7 +282,7 @@ public sealed class PdfRenderService : IDisposable
         }
     }
 
-    private ImageSource? RenderThumbnailCore(int pageIndex, int thumbWidth, int rotation)
+    private ImageSource? RenderThumbnailCore(int pageIndex, int thumbWidth, int rotation, ThumbnailInk? ink, int inkVer)
     {
         try
         {
@@ -307,15 +320,36 @@ public sealed class PdfRenderService : IDisposable
             if (raw == null)
                 return null;
 
-            var (rotated, pxW, pxH) = BitmapHelpers.RotateBitmap(raw, contentPxW, contentPxH, rotation);
-            var bmp = EncodeThumbnail(rotated, pxW, pxH);
+            ImageSource? bmp;
+            if (ink == null)
+            {
+                // 无墨迹：保持原路径（像素旋转 → PNG 编码），零额外开销
+                var (rotated, pxW, pxH) = BitmapHelpers.RotateBitmap(raw, contentPxW, contentPxH, rotation);
+                bmp = EncodeThumbnail(rotated, pxW, pxH);
+            }
+            else
+            {
+                // 有墨迹：先编码未旋转位图，再走打印预览同款复合管线（内部缩放墨迹 + 旋转输出）
+                var unrotated = EncodeThumbnail(raw, contentPxW, contentPxH);
+                if (unrotated == null)
+                    return null;
+                bmp = PrintService.CompositePageWithInk(unrotated, ink.Strokes,
+                    contentPxW, contentPxH, ink.CoordW, ink.CoordH, rotation);
+            }
             if (bmp == null)
                 return null;
 
-            lock (_thumbCacheLock)
+            // 版本门槛 + 写缓存与 InvalidateThumbnailInk 同序嵌套（queueLock→cacheLock）：
+            // 渲染期间该页墨迹已变更 → 结果过期，不入缓存、不回填。
+            lock (_thumbQueueLock)
             {
-                _thumbCache[key] = bmp;
-                Cache(_thumbLruOrder, _thumbCache, key, MaxCachedThumbnails);
+                if (_thumbInkVersions.GetValueOrDefault(pageIndex) != inkVer)
+                    return null;
+                lock (_thumbCacheLock)
+                {
+                    _thumbCache[key] = bmp;
+                    Cache(_thumbLruOrder, _thumbCache, key, MaxCachedThumbnails);
+                }
             }
             return bmp;
         }
@@ -323,6 +357,49 @@ public sealed class PdfRenderService : IDisposable
         {
             App.Log($"RenderThumbnail p{pageIndex}", ex);
             return null;
+        }
+    }
+
+    /// <summary>一页墨迹变更后失效其缩略图：版本号 +1、清该页 4 个旋转档缓存、
+    /// 丢弃该页排队/在途旧请求（完成为 null，让刷新请求能立即重新入队）。</summary>
+    public void InvalidateThumbnailInk(int pageIndex)
+    {
+        lock (_thumbQueueLock)
+        {
+            _thumbInkVersions[pageIndex] = _thumbInkVersions.GetValueOrDefault(pageIndex) + 1;
+
+            // 剔除该页排队项（完成为 null）；其余项按当前焦点重排，开销同 UpdateThumbnailFocus
+            var keep = new List<((int Page, int Width, int Rotation, ThumbnailInk? Ink, int InkVer), long)>();
+            while (_thumbQueue.TryDequeue(out var item, out _))
+            {
+                if (item.Page == pageIndex)
+                {
+                    if (_thumbInflight.Remove(CacheKey(item.Page, item.Rotation), out var dropped))
+                        dropped.TrySetResult(null);
+                }
+                else
+                    keep.Add((item, ThumbPriority(item.Page)));
+            }
+            foreach (var (item, priority) in keep)
+                _thumbQueue.Enqueue(item, priority);
+
+            // 在途渲染：提前完成为 null（worker 随后的 TrySetResult 落在已完结 TCS 上无效果，版本门槛挡住缓存写入）
+            for (int step = 0; step < 4; step++)
+            {
+                if (_thumbInflight.Remove(CacheKey(pageIndex, step * 90), out var inflight))
+                    inflight.TrySetResult(null);
+            }
+
+            // 定向清该页 4 个旋转档缓存（与写缓存同序嵌套 queueLock→cacheLock，检查与清除不可拆开）
+            lock (_thumbCacheLock)
+            {
+                for (int step = 0; step < 4; step++)
+                {
+                    long key = CacheKey(pageIndex, step * 90);
+                    if (_thumbCache.Remove(key))
+                        _thumbLruOrder.Remove(key);
+                }
+            }
         }
     }
 
@@ -465,6 +542,7 @@ public sealed class PdfRenderService : IDisposable
             _thumbInflight.Clear();
             _thumbFocusFirst = _thumbFocusLast = -1;
             _thumbWantStart = _thumbWantEnd = -1;
+            _thumbInkVersions.Clear();
         }
         lock (PdfiumInterop.PdfiumLock)
         {

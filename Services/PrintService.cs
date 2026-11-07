@@ -321,9 +321,10 @@ public static class PrintService
     }
 
     /// <summary>把该页墨迹按内容坐标复合到 PDF 位图上，并按页面显示旋转角旋转到输出方向。
-    /// 后台线程调用：位图已冻结，DrawingVisual 在本线程创建。</summary>
+    /// 后台线程调用：位图已冻结，DrawingVisual 在本线程创建。
+    /// strokes 接受 StrokeCollection 或调用方快照的笔画数组（缩略图传 UI 线程引用数组快照）。</summary>
     public static BitmapSource CompositePageWithInk(
-        BitmapSource pageBitmap, StrokeCollection strokes,
+        BitmapSource pageBitmap, IReadOnlyList<Stroke> strokes,
         double contentDipW, double contentDipH,
         double inkCoordinateW, double inkCoordinateH, int rotation)
     {
@@ -358,7 +359,8 @@ public static class PrintService
             {
                 dc.PushTransform(new ScaleTransform(
                     contentW / inkCoordinateW, contentH / inkCoordinateH));
-                strokes.Draw(dc);
+                foreach (var stroke in strokes)
+                    stroke.Draw(dc);   // 与 StrokeCollection.Draw(dc) 等价（其内部即逐笔 Stroke.Draw）
                 dc.Pop();
             }
 

@@ -7,8 +7,7 @@
     "Authors": "WuChanging",
     "Description": "A fantastic Ink Canvas in WPF/C#, based on WXRIW/Ink-Canvas.",
     "License": "GPL-3.0 license",
-    "LicenseUrl": "https://github.com/InkCanvas/Ink-Canvas-Artistry?tab=GPL-3.0-1-ov-file",
-
+    "LicenseUrl": "https://github.com/InkCanvas/Ink-Canvas-Artistry?tab=GPL-3.0-1-ov-file"
   },
   {
     "RepositoryId": "KillerPDF",
@@ -18,8 +17,7 @@
     "Authors": "SteveTheKiller",
     "Description": "Free and open-source PDF editor for Windows with a built-in PDF 2.0 engine. View, annotate, OCR, merge, split, crop, rotate, compare, edit text, draw, sign, fill forms, print, flatten, and open password-protected PDFs without a subscription.",
     "License": "GPL-3.0 license",
-    "LicenseUrl": "https://github.com/SteveTheKiller/KillerPDF?tab=GPL-3.0-1-ov-file",
-
+    "LicenseUrl": "https://github.com/SteveTheKiller/KillerPDF?tab=GPL-3.0-1-ov-file"
   },
   {
     "PackageId": "Carrot.UI.ColorPicker",
@@ -45,7 +43,7 @@
   },
   {
     "PackageId": "FluentIcons.Common",
-    "PackageVersion": "1.1.312",
+    "PackageVersion": "2.1.345",
     "Authors": "davidxuang",
     "Description": "A shared library for FluentUI System Icons control library.",
     "License": "MIT",
@@ -54,7 +52,7 @@
   },
   {
     "PackageId": "FluentIcons.Wpf",
-    "PackageVersion": "1.1.312",
+    "PackageVersion": "2.1.345",
     "Authors": "davidxuang",
     "Description": "FluentUI System Icons control library for WPF.",
     "License": "MIT",
@@ -72,18 +70,29 @@
   },
   {
     "PackageId": "iNKORE.UI.WPF.Modern",
-    "PackageVersion": "0.10.2",
+    "PackageVersion": "0.11.0",
     "PackageProjectUrl": "https://docs.inkore.net/ui-wpf-modern",
     "Copyright": "Copyright \u00A9 iNKORE! (iNKORE Studios) 2025. All rights reserved.",
     "Authors": "Yoojun Zhou",
     "Description": "Modern (Fluent 2) styles and controls for your WPF applications.",
-    "License": "https://github.com/iNKORE-NET/UI.WPF.Modern/blob/main/LICENSE",
-    "LicenseUrl": "https://github.com/iNKORE-NET/UI.WPF.Modern/blob/main/LICENSE",
+    "License": "https://github.com/iNKORE-NET/UI.WPF.Modern/blob/main/LICENSE.md",
+    "LicenseUrl": "https://github.com/iNKORE-NET/UI.WPF.Modern/blob/main/LICENSE.md",
     "LicenseInformationOrigin": 1
   },
   {
+    "PackageId": "Markdig",
+    "PackageVersion": "1.1.3",
+    "PackageProjectUrl": "https://xoofx.github.io/markdig",
+    "Copyright": "Alexandre Mutel",
+    "Authors": "Alexandre Mutel",
+    "Description": "Markdig is a fast, powerful, CommonMark compliant, extensible Markdown processor for .NET.",
+    "License": "BSD-2-Clause",
+    "LicenseUrl": "https://licenses.nuget.org/BSD-2-Clause",
+    "LicenseInformationOrigin": 0
+  },
+  {
     "PackageId": "Microsoft.Data.Sqlite",
-    "PackageVersion": "10.0.13",
+    "PackageVersion": "10.0.14",
     "PackageProjectUrl": "https://docs.microsoft.com/dotnet/standard/data/sqlite/",
     "Copyright": "\u00A9 Microsoft Corporation. All rights reserved.",
     "Authors": "Microsoft",
@@ -94,7 +103,7 @@
   },
   {
     "PackageId": "Microsoft.Data.Sqlite.Core",
-    "PackageVersion": "10.0.13",
+    "PackageVersion": "10.0.14",
     "PackageProjectUrl": "https://docs.microsoft.com/dotnet/standard/data/sqlite/",
     "Copyright": "\u00A9 Microsoft Corporation. All rights reserved.",
     "Authors": "Microsoft",
@@ -104,14 +113,24 @@
     "LicenseInformationOrigin": 0
   },
   {
-    "PackageId": "Newtonsoft.Json",
-    "PackageVersion": "13.0.4",
-    "PackageProjectUrl": "https://www.newtonsoft.com/json",
-    "Copyright": "Copyright \u00A9 James Newton-King 2008",
-    "Authors": "James Newton-King",
-    "Description": "Json.NET is a popular high-performance JSON framework for .NET",
-    "License": "MIT",
-    "LicenseUrl": "https://licenses.nuget.org/MIT",
+    "PackageId": "Microsoft.Web.WebView2",
+    "PackageVersion": "1.0.3912.50",
+    "PackageProjectUrl": "https://aka.ms/webview",
+    "Copyright": "\u00A9 Microsoft Corporation. All rights reserved.",
+    "Authors": "Microsoft",
+    "Description": "The WebView2 control enables you to embed web technologies (HTML, CSS, and JavaScript) in your native applications powered by Microsoft Edge (Chromium).\nThis package is necessary for Win32 C/C\u002B\u002B, WPF, and WinForms applications. To learn more about package versions checkout https://aka.ms/wv2-packageversion. To learn best practices checkout: https://aka.ms/wv2-bestpractices.",
+    "License": "BSD-3-Clause",
+    "LicenseUrl": "https://aka.ms/deprecateLicenseUrl",
+    "LicenseInformationOrigin": 5
+  },
+  {
+    "PackageId": "Sage.MarkdownRenderer",
+    "PackageVersion": "1.0.0.10",
+    "PackageProjectUrl": "https://gitcode.com/liupenglai/Sage",
+    "Authors": "LiuPengLai",
+    "Description": "Sage.MarkdownRenderer \u662F\u4E00\u4E2A\u57FA\u4E8EWebView2\u5C01\u88C5\u7684\u6E32\u67D3\u5E93\uFF0C\u652F\u6301\u76F4\u63A5\u89E3\u6790Markdown\u7684\u5B57\u7B26\u4E32\u5728WebView2\u4E2D\u6E32\u67D3\u3002\n    - \u652F\u6301\u8868\u60C5\n    - \u652F\u6301\u4E30\u5BCC\u7684\u6587\u672C\u683C\u5F0F\n    - \u652F\u6301\u8868\u683C\n    - \u652F\u6301\u8FDC\u7A0B\u56FE\u7247\n    - \u652F\u6301\u52A0\u8F7D\u52A8\u6548\u3001\u4EA4\u4E92\u52A8\u6548\n    - \u652F\u6301\u8BBE\u7F6E\u7CFB\u7EDF\u4E3B\u9898\u6DF1\u8272\u3001\u6D45\u8272\u3001\u81EA\u52A8(\u53EF\u8DDF\u968F\u7CFB\u7EDF)\n    - \u652F\u6301\u914D\u7F6E\u663E\u793A\u5185\u5BB9\u8272\n    - \u652F\u6301AOT\u7F16\u8BD1",
+    "License": "Apache-2.0",
+    "LicenseUrl": "https://licenses.nuget.org/Apache-2.0",
     "LicenseInformationOrigin": 0
   },
   {
@@ -157,7 +176,7 @@
   },
   {
     "PackageId": "System.IO.Hashing",
-    "PackageVersion": "10.0.13",
+    "PackageVersion": "10.0.14",
     "PackageProjectUrl": "https://dot.net/",
     "Copyright": "\u00A9 Microsoft Corporation. All rights reserved.",
     "Authors": "Microsoft",

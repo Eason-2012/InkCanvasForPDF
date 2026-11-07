@@ -25,8 +25,8 @@ namespace InkCanvasForPDF.Board
         /// <summary>请求退出画板（ImageBlackboard_Click 触发，由 MainWindow 订阅退出画板模式）。</summary>
         public event EventHandler? ExitRequested;
 
-        /// <summary>橡皮直径（DIP）：由 MainWindow 从 InkCanvasForPDF 设置（EraserSizeSetting 经 15+3.5x 换算）注入，
-        /// 替代 ICA 的 EraserSize 0~4 档 × 90，使画板与 PDF 批注的橡皮粗细一致。</summary>
+        /// <summary>橡皮直径（DIP）：画板按自身 Canvas.EraserSizeSetting（15+3.5x 换算）维护，与 PDF 侧完全独立；
+        /// 替代 ICA 的 EraserSize 0~4 档 × 90。</summary>
         public static double EraserDiameter { get; set; } = 50;
 
         public BoardView()
@@ -76,14 +76,7 @@ namespace InkCanvasForPDF.Board
                 Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(FlyInBoardEraserPalette));
             // 滑动清空滑块回弹变换（拖动/回弹动画统一作用于该 Transform，照 PDF InkToolBar 构造器）
             BoardClearInkThumb.RenderTransform = _boardClearInkTransform;
-            // 橡皮菜单页签回填：恢复持久化的面积擦/墨迹擦（DataContext 由 MainWindow 继承，构造期间尚为 null，
-            // 故放 Loaded；isLoaded 此前已在构造器末尾置 true）
-            Loaded += (_, _) =>
-            {
-                if (Vm is not { } vm) return;
-                forcePointEraser = !vm.InkTool.IsStrokeEraser;
-                BoardPivotEraser.SelectedIndex = vm.InkTool.IsStrokeEraser ? 1 : 0;
-            };
+            // 橡皮菜单页签/粗细回填统一在 Loaded 的 RestoreMenuControlsFromSettings 中完成（画板自有记忆，与 PDF 独立）
             // 图形面板提示文字与选中高亮随主题刷新；Loaded 先按当前主题设一次初值
             Loaded += (_, _) => ApplyShapeHintColor();
             ThemeService.ThemeChanged += () =>
@@ -99,6 +92,7 @@ namespace InkCanvasForPDF.Board
             // 对齐 ICA Window_Loaded：先备画笔属性 → 读设置 → 放行 isLoaded 守卫的处理器
             loadPenCanvas();
             LoadSettings(true);
+            ApplyDefaultMenuState();   // 「默认选项」作为初始值（打开文档后由 ApplyDocumentMenuState 按文档记忆覆盖）
             RestoreMenuControlsFromSettings();   // 手势开关/页签/滑块回读（isLoaded 尚为 false，各处理器 no-op 不回写）
             isLoaded = true;
             // 多指书写运行时接线（事件订阅 + isInMultiTouchMode）按保存值重建；
@@ -109,6 +103,27 @@ namespace InkCanvasForPDF.Board
 
             InitBoardCore();   // MW_BoardCore：撤销/重做状态订阅 + 笔画历史跟踪
             InitializePauseInkToShape();   // MW_InkToShape：停顿强制识别追踪器挂到 inkCanvas（配置由 MainWindow 推送）
+        }
+
+        /// <summary>把画板「默认选项」写入运行期记忆字段（Canvas/Gesture 均为 JsonIgnore，不入 Settings.json）。</summary>
+        private void ApplyDefaultMenuState()
+        {
+            var d = Settings.Defaults;
+            Settings.Canvas.LastPenKind = Math.Clamp(d.PenKind, 0, 2);
+            Settings.Canvas.PenWidth = Math.Clamp(d.PenWidth, 0.5, 15);
+            Settings.Canvas.HighlighterWidth = Math.Clamp(d.HighlighterWidth, 0.5, 15);
+            Settings.Canvas.InkWidth = Settings.Canvas.LastPenKind == 2
+                ? Settings.Canvas.HighlighterWidth
+                : Settings.Canvas.PenWidth;
+            Settings.Canvas.InkAlpha = Math.Clamp(d.HighlighterAlpha, 20, 240);
+            Settings.Gesture.IsEnableMultiTouchMode = d.MultiTouch;
+            Settings.Gesture.IsEnableTwoFingerZoom = d.TwoFingerZoom;
+            Settings.Gesture.IsEnableTwoFingerTranslate = d.TwoFingerPan;
+            Settings.Gesture.IsEnableTwoFingerRotation = d.TwoFingerRotate;
+            // 画板橡皮默认值（与 PDF 完全独立）
+            Settings.Canvas.EraserSizeSetting = Math.Clamp(d.EraserSize, 1, 30);
+            Settings.Canvas.EraserModeByStrokeSetting = d.EraserMode == 1;
+            SyncBoardEraserDiameter();
         }
 
         /// <summary>把画板墨迹/手势菜单控件回填到 Settings 当前值（手势 4 开关、墨迹页签、粗细/不透明度滑块）。
@@ -126,25 +141,23 @@ namespace InkCanvasForPDF.Board
             BoardPivotInk.SelectedIndex = boardInkType;
             // 粗细/不透明度滑块回读（ICA MW_SettingsToLoad.cs:398-401 同款；粗细滑块显示值 = InkWidth ×2）
             SyncBoardInkControls();
+            // 橡皮菜单页签/粗细回读（画板自有记忆，与 PDF 完全独立）
+            forcePointEraser = !Settings.Canvas.EraserModeByStrokeSetting;
+            _syncingBoardEraser = true;
+            BoardPivotEraser.SelectedIndex = Settings.Canvas.EraserModeByStrokeSetting ? 1 : 0;
+            BoardEraserSizeSlider.Value = InkToolViewModel.SliderFromEraserSize(EraserDiameter);
+            _syncingBoardEraser = false;
         }
 
-        /// <summary>文档打开时回读画板菜单记忆（per-PDF 墨迹库 view_state）：先把迁移字段重置为代码默认
+        /// <summary>文档打开时回读画板菜单记忆（per-PDF 墨迹库 view_state）：先把迁移字段重置为「默认选项」
         /// （防继承上一个 PDF），再逐键覆盖到共享 Settings 实例（被迁字段已 JsonIgnore，不回写 Settings.json），
-        /// 最后回填菜单控件与图形置顶字形。无库文档 viewState 为空 → 全走代码默认。</summary>
+        /// 最后回填菜单控件与图形置顶字形。无库文档 viewState 为空 → 全走默认值。</summary>
         internal void ApplyDocumentMenuState(IReadOnlyDictionary<string, string> viewState)
         {
+            ApplyDefaultMenuState();
             var def = new Settings();
-            Settings.Canvas.LastPenKind = def.Canvas.LastPenKind;
-            Settings.Canvas.PenColor = def.Canvas.PenColor;
-            Settings.Canvas.PenWidth = def.Canvas.PenWidth;
-            Settings.Canvas.HighlighterColor = def.Canvas.HighlighterColor;
-            Settings.Canvas.HighlighterWidth = def.Canvas.HighlighterWidth;
-            Settings.Canvas.InkWidth = def.Canvas.InkWidth;
-            Settings.Canvas.InkAlpha = def.Canvas.InkAlpha;
-            Settings.Gesture.IsEnableMultiTouchMode = def.Gesture.IsEnableMultiTouchMode;
-            Settings.Gesture.IsEnableTwoFingerZoom = def.Gesture.IsEnableTwoFingerZoom;
-            Settings.Gesture.IsEnableTwoFingerTranslate = def.Gesture.IsEnableTwoFingerTranslate;
-            Settings.Gesture.IsEnableTwoFingerRotation = def.Gesture.IsEnableTwoFingerRotation;
+            Settings.Canvas.PenColor = def.Canvas.PenColor;                       // 画板无默认颜色项：仍按代码默认 5（随画布兜底）
+            Settings.Canvas.HighlighterColor = def.Canvas.HighlighterColor;       // 荧光笔默认 103=黄
 
             if (viewState.TryGetValue("board_pen_kind", out var k1)
                 && int.TryParse(k1, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v1))
@@ -175,9 +188,18 @@ namespace InkCanvasForPDF.Board
                 Settings.Gesture.IsEnableTwoFingerTranslate = k10 == "1";
             if (viewState.TryGetValue("board_gesture_rotate", out var k11))
                 Settings.Gesture.IsEnableTwoFingerRotation = k11 == "1";
+            // 画板橡皮模式/粗细记忆（与 PDF 侧完全独立）
+            if (viewState.TryGetValue("board_eraser_size", out var k12)
+                && int.TryParse(k12, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v12))
+                Settings.Canvas.EraserSizeSetting = Math.Clamp(v12, 1, 30);
+            if (viewState.TryGetValue("board_eraser_bystroke", out var k13))
+                Settings.Canvas.EraserModeByStrokeSetting = k13 == "1";
+            SyncBoardEraserDiameter();
 
-            // 图形菜单置顶：字段 + 图钉字形（E718=固定 / E77A=自动隐藏）
-            _shapePanelPinned = viewState.TryGetValue("board_shape_pinned", out var kp) && kp == "1";
+            // 图形菜单置顶：字段 + 图钉字形（E718=固定 / E77A=自动隐藏）；无文档记忆时用默认选项
+            _shapePanelPinned = viewState.TryGetValue("board_shape_pinned", out var kp)
+                ? kp == "1"
+                : Settings.Defaults.ShapePinned;
             BoardBorderDrawShapePin.Glyph = _shapePanelPinned ? "\uE718" : "\uE77a";
 
             if (!isLoaded) return;   // Loaded 之前的初次恢复由构造流程负责
@@ -193,6 +215,8 @@ namespace InkCanvasForPDF.Board
                 ApplyBoardInkType(Math.Clamp(Settings.Canvas.LastPenKind, 0, 2));
                 SyncBoardInkControls();
                 CheckColorTheme();
+                ApplyEraserShape();    // 橡皮粗细记忆已变：面积擦激活时即时换新尺寸
+                ApplyEraserCursor();
             }
         }
 
@@ -417,16 +441,104 @@ namespace InkCanvasForPDF.Board
         /// <summary>画笔光标开关（主设置 isShowCursor；由 MainWindow 注入，替代黑板本地 ICA Settings.Canvas.IsShowCursor）。</summary>
         public bool PenCursorEnabled { get; set; } = false;
 
+        /// <summary>画板当前是否处于橡皮（强制橡皮或画布为面积擦/墨迹擦），供全局触摸光标判定。</summary>
+        public bool IsEraserActive =>
+            forceEraser || inkCanvas.EditingMode is InkCanvasEditingMode.EraseByPoint or InkCanvasEditingMode.EraseByStroke;
+
         /// <summary>按当前开关与编辑模式重放光标（设置变更即时生效）。</summary>
-        public void ApplyPenCursor() =>
-            inkCanvas.ForceCursor = PenCursorEnabled && inkCanvas.EditingMode == InkCanvasEditingMode.Ink;
+        public void ApplyPenCursor() => ApplyInkCursor();
 
         private InkCircleCursor? _eraserCursor;        // 黑板擦光标缓存（尺寸没变则复用）
         private double _eraserCursorWidth = -1;
         private double _palmEraseWidth;                // 手掌擦除洞宽（屏幕 DIP，0 = 未在手掌擦除；光标与洞等大）
 
-        /// <summary>按 EraserDiameter 重建黑板擦光标并按编辑模式应用：面积擦显示自定义黑板擦（38:56，
-        /// 与 PDF 批注侧同款），其余模式交还 WPF 内置（Cursor="Pen"）。橡皮粗细设置变化时由 MainWindow 调用。
+        private InkCircleCursor? _penTipCursor;        // 笔尖光标缓存（宽/高/矩形/旋转/颜色变化才重建）
+        private double _penTipWidth = -1, _penTipHeight = -1;
+        private bool _penTipIsRect;
+        private double _penTipRotateDeg;
+        private Color _penTipColor;
+
+        /// <summary>笔模式判定：非强制橡皮、非形状手绘、非手掌擦除，且编辑模式为书写（Ink）或自绘（None）。</summary>
+        private bool IsPenCursorMode =>
+            !forceEraser && drawingShapeMode == 0 && _palmEraseWidth <= 0
+            && (inkCanvas.EditingMode == InkCanvasEditingMode.Ink
+                || inkCanvas.EditingMode == InkCanvasEditingMode.None);
+
+        /// <summary>画板光标唯一入口：笔模式按「显示画笔光标」强制钢笔或与笔尖同形的自定义光标；
+        /// 面积擦显示黑板擦；墨迹擦/选择/形状交还 WPF 内置（Cursor=Pen）。</summary>
+        public void ApplyInkCursor()
+        {
+            if (!isLoaded) return;
+
+            if (IsPenCursorMode)
+            {
+                if (PenCursorEnabled)
+                {
+                    // 开=系统钢笔：ForceCursor 覆盖 None（多指自绘）模式，避免 InkCanvas 返回 null 变箭头
+                    inkCanvas.UseCustomCursor = false;
+                    inkCanvas.Cursor = Cursors.Pen;
+                    inkCanvas.ForceCursor = true;
+                    return;
+                }
+                ApplyPenTipCursor();   // 关=与笔尖同形（普通圆点 / 毛笔斜椭圆 / 荧光笔竖长方形）
+                return;
+            }
+
+            if (inkCanvas.EditingMode == InkCanvasEditingMode.EraseByPoint && _eraserCursor != null)
+            {
+                inkCanvas.ForceCursor = false;   // 黑板擦交给 UseCustomCursor + Cursor
+                inkCanvas.UseCustomCursor = true;   // UseCustomCursor=true 时 InkCanvas 不再拦截 QueryCursor
+                inkCanvas.Cursor = _eraserCursor.Cursor;
+            }
+            else
+            {
+                inkCanvas.ForceCursor = false;
+                inkCanvas.UseCustomCursor = false;
+                inkCanvas.Cursor = Cursors.Pen;   // 还原 XAML 默认：擦除/选择/形状切换后不残留旧光标
+            }
+        }
+
+        /// <summary>笔尖光标：尺寸/形状/斜置/颜色跟随 DefaultDrawingAttributes，ForceCursor 强制可见。</summary>
+        private void ApplyPenTipCursor()
+        {
+            var da = inkCanvas.DefaultDrawingAttributes;
+            double w = da.Width;    // 光标尺寸严格跟随笔迹（不设最小下限；上限 256 由 Create 等比处理）
+            double h = da.Height;
+            bool isRect = da.StylusTip == StylusTip.Rectangle;
+            double rotateDeg = da.StylusTipTransform.IsIdentity ? 0 : ViewModels.InkToolViewModel.BrushTipAngleDeg;
+            if (!isRect && rotateDeg != 0)
+                w *= ViewModels.InkToolViewModel.BrushTipSquash;   // 斜椭圆：与笔尖变换同序（先压扁后旋转）
+            var color = da.Color;
+
+            // >0.01 才重建（挡浮点噪声），形状/旋转/颜色/尺寸任一变化即重建
+            if (_penTipCursor == null || Math.Abs(_penTipWidth - w) > 0.01 || Math.Abs(_penTipHeight - h) > 0.01
+                || _penTipIsRect != isRect || _penTipRotateDeg != rotateDeg || _penTipColor != color)
+            {
+                double dpi = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
+                var created = InkCircleCursor.CreatePenTip(w, h, dpi, color, isRect, rotateDeg);
+                if (created != null)
+                {
+                    var old = _penTipCursor;
+                    _penTipCursor = created;   // 先赋新再释放旧：避免销毁仍被画布引用的光标句柄
+                    _penTipWidth = w;
+                    _penTipHeight = h;
+                    _penTipIsRect = isRect;
+                    _penTipRotateDeg = rotateDeg;
+                    _penTipColor = color;
+                    old?.Dispose();
+                }
+            }
+
+            if (_penTipCursor != null)
+            {
+                inkCanvas.UseCustomCursor = true;
+                inkCanvas.Cursor = _penTipCursor.Cursor;
+                inkCanvas.ForceCursor = true;
+            }
+        }
+
+        /// <summary>按 EraserDiameter 重建黑板擦光标并按当前工具应用：面积擦显示自定义黑板擦（38:56，
+        /// 与 PDF 批注侧同款），其余工具由 ApplyInkCursor 统一决定。橡皮粗细设置变化时由 MainWindow 调用。
         /// 手掌擦除期间宽 = 手掌接触面积算出的洞（与洞严格等大），不按橡皮粗细。</summary>
         public void ApplyEraserCursor()
         {
@@ -445,17 +557,7 @@ namespace InkCanvasForPDF.Board
                 }
             }
 
-            if (inkCanvas.EditingMode == InkCanvasEditingMode.EraseByPoint && _eraserCursor != null)
-            {
-                inkCanvas.UseCustomCursor = true;   // UseCustomCursor=true 时 InkCanvas 不再拦截 QueryCursor
-                inkCanvas.Cursor = _eraserCursor.Cursor;
-            }
-            else
-            {
-                inkCanvas.UseCustomCursor = false;
-                inkCanvas.Cursor = Cursors.Pen;   // 还原 XAML 默认（照 MainWindow.UpdateInkCursor 同款修复）：
-                                                  // 面积擦曾把 Cursor 覆盖为黑板擦位图，残留会让切到墨迹擦/笔后仍显示旧橡皮光标
-            }
+            ApplyInkCursor();   // 光标应用统一由 ApplyInkCursor 决定（含笔模式自定义笔尖光标）
         }
 
         /// <summary>橡皮粗细变化时按 EraserDiameter 重建面积擦 EraserShape（光标由 ApplyEraserCursor 同步；

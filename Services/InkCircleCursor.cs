@@ -55,6 +55,11 @@ internal sealed class InkCircleCursor : IDisposable
         });
     }
 
+    /// <summary>全透明光标：触摸输入时替代系统触摸指针（仍占位但不可见）。
+    /// 尺寸固定 16 DIP（不可见，仅规避过小位图的渲染边界），空绘制即全透明。</summary>
+    public static InkCircleCursor? CreateInvisible(double dpiScale) =>
+        Create(16, 16, dpiScale, (_, _) => { });
+
     /// <summary>黑板擦光标：米白圆角矩形 + 灰描边 + 双竖条纹（38:56，自行绘制），
     /// 宽 = 擦除宽、高 = 宽 × 56/38，可见外缘恰好 = 擦除矩形。</summary>
     public static InkCircleCursor? CreateEraserBoard(double widthDips, double dpiScale)
@@ -98,7 +103,8 @@ internal sealed class InkCircleCursor : IDisposable
     private static InkCircleCursor? Create(double widthDips, double heightDips, double dpiScale, Action<DrawingContext, Rect> draw)
     {
         // 上限 256 DIP：防超大位图；超限时按同一比例整体缩（保持 38:56 等形状比例——
-        // 分维独立截断会让大尺寸光标先截高、形状"变胖"，且与擦除洞不等大）。下限 4 DIP。
+        // 分维独立截断会让大尺寸光标先截高、形状"变胖"，且与擦除洞不等大）。
+        // 不设下限：光标尺寸严格跟随笔迹/擦除尺寸，极小尺寸由 1 像素位图兜底。
         double w = widthDips;
         double h = heightDips;
         double maxDim = Math.Max(w, h);
@@ -108,8 +114,6 @@ internal sealed class InkCircleCursor : IDisposable
             w *= k;
             h *= k;
         }
-        w = Math.Max(4, w);
-        h = Math.Max(4, h);
         const double pad = 2;                          // DIP 边距，容纳描边外扩
 
         var visual = new DrawingVisual();

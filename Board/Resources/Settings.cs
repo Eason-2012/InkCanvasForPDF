@@ -17,6 +17,35 @@ namespace InkCanvasForPDF.Board
         public Canvas Canvas { get; set; } = new Canvas();
         [JsonPropertyName("gesture")]
         public Gesture Gesture { get; set; } = new Gesture();
+        [JsonPropertyName("defaults")]
+        public Defaults Defaults { get; set; } = new Defaults();
+    }
+
+    /// <summary>画板「默认选项」：打开文档无画板记忆时套用（不改运行期记忆字段语义）。</summary>
+    public class Defaults
+    {
+        [JsonPropertyName("penKind")]
+        public int PenKind { get; set; } = 0;   // 0=硬笔 1=软笔 2=荧光笔
+        [JsonPropertyName("penWidth")]
+        public double PenWidth { get; set; } = 2.5;   // = 滑块值一半（滑块 5）
+        [JsonPropertyName("highlighterWidth")]
+        public double HighlighterWidth { get; set; } = 2.5;
+        [JsonPropertyName("highlighterAlpha")]
+        public int HighlighterAlpha { get; set; } = 140;   // 20~240
+        [JsonPropertyName("eraserMode")]
+        public int EraserMode { get; set; } = 0;     // 0=面积擦 1=墨迹擦（与 PDF 独立）
+        [JsonPropertyName("eraserSize")]
+        public int EraserSize { get; set; } = 10;    // 橡皮粗细滑块 1~30（与 PDF 独立）
+        [JsonPropertyName("shapePinned")]
+        public bool ShapePinned { get; set; } = false;
+        [JsonPropertyName("multiTouch")]
+        public bool MultiTouch { get; set; } = true;
+        [JsonPropertyName("twoFingerPan")]
+        public bool TwoFingerPan { get; set; } = true;
+        [JsonPropertyName("twoFingerZoom")]
+        public bool TwoFingerZoom { get; set; } = true;
+        [JsonPropertyName("twoFingerRotate")]
+        public bool TwoFingerRotate { get; set; } = false;
     }
 
     public class Canvas
@@ -30,6 +59,12 @@ namespace InkCanvasForPDF.Board
         public int InkStyle { get; set; } = 3; // 3=时间笔锋（新装机默认；下拉框显示顺序映射见 BoardPenStyleMap，0=点集 1=速率 2=关闭）
         [JsonPropertyName("usingWhiteboard")]
         public bool UsingWhiteboard { get; set; }
+
+        // 画板橡皮模式/粗细：与 PDF 侧完全独立、各自记忆（不入 Settings.json，随 view_state 按 PDF 存墨迹库）
+        [JsonIgnore]
+        public int EraserSizeSetting { get; set; } = 10;
+        [JsonIgnore]
+        public bool EraserModeByStrokeSetting { get; set; } = false;
 
         // ────── 墨迹菜单按类型记忆（画板与 PDF 侧互相独立；不入 Settings.json，随 view_state 按 PDF 存墨迹库）──────
         [JsonIgnore]

@@ -26,7 +26,7 @@ namespace InkCanvasForPDF.Board
             SaveSettingsToFile();
             if (Settings.Canvas.UsingWhiteboard)
             {
-                if (inkColor == 5) lastBoardInkColor = 0;
+                if (inkColor == 5) lastBoardInkColor = 1;   // 切白板：白笔 → 深色红
             }
             else
             {
@@ -78,12 +78,14 @@ namespace InkCanvasForPDF.Board
                 // 面板跟随画板栏缩放档（Popup 不在 Viewbox 内，需自行应用；不套 PDF 的 0.65）
                 BoardEraserPaletteRoot.LayoutTransform = new ScaleTransform(_boardBarScale, _boardBarScale);
                 BoardEraserPalette.PlacementTarget = BoardEraser;
-                // 打开前回填 UI：Pivot 页签（持久化的面积擦/墨迹擦）、粗细滑块（值=SliderFromEraserSize(EraserSize)）、
-                // 手掌擦除/笔尖模式开关（PDF 橡皮菜单共用同一设置，两侧一致）
+                // 打开前回填 UI：Pivot 页签（画板自有的面积擦/墨迹擦）、粗细滑块（值=SliderFromEraserSize(EraserDiameter)）、
+                // 手掌擦除/笔尖模式开关（与 PDF 侧共用同一设置）
                 if (Vm is { } vm)
                 {
-                    BoardPivotEraser.SelectedIndex = vm.InkTool.IsStrokeEraser ? 1 : 0;
-                    BoardEraserSizeSlider.Value = InkToolViewModel.SliderFromEraserSize(vm.InkTool.EraserSize);
+                    _syncingBoardEraser = true;
+                    BoardPivotEraser.SelectedIndex = Settings.Canvas.EraserModeByStrokeSetting ? 1 : 0;
+                    BoardEraserSizeSlider.Value = InkToolViewModel.SliderFromEraserSize(EraserDiameter);
+                    _syncingBoardEraser = false;
                     _syncingBoardEraserToggles = true;
                     BoardToggleSwitchPalmEraseArea.IsOn = BoardToggleSwitchPalmEraseStroke.IsOn = vm.Settings.IsPalmEraseEnabled;
                     BoardToggleSwitchNibModeArea.IsOn = BoardToggleSwitchNibModeStroke.IsOn = vm.Settings.IsNibModeEnabled;
@@ -99,16 +101,22 @@ namespace InkCanvasForPDF.Board
             }
         }
 
+        /// <summary>画板橡皮 UI 回填重入守卫（程序化赋页签/滑块时不写设置）。</summary>
+        private bool _syncingBoardEraser;
+
+        /// <summary>按画板自身橡皮粗细设置重建实际直径（15 + 3.5×滑块值），与 PDF 侧完全独立。</summary>
+        private void SyncBoardEraserDiameter()
+            => EraserDiameter = InkToolViewModel.EraserSizeFromSlider(Settings.Canvas.EraserSizeSetting);
+
         /// <summary>按当前模式（forcePointEraser：true=面积擦，false=墨迹擦）建立橡皮 EraserShape/EditingMode。
-        /// 直径取 InkCanvasForPDF 设置（EraserSizeSetting 经 15+3.5x 换算，由 MainWindow 注入），与 PDF 批注侧一致；黑板擦 38:56 矩形。</summary>
+        /// 直径取画板自身 Canvas.EraserSizeSetting（15+3.5x 换算，与 PDF 侧完全独立）；黑板擦 38:56 矩形。</summary>
         private void ApplyBoardEraserMode()
         {
             forceEraser = true;
             drawingShapeMode = 0;
-            // 单一真源 = 共享 VM 的 IsStrokeEraser：应用前重新对齐 forcePointEraser，
-            // 保证与 Pivot 页签/UI 一致（与 PDF 侧"VM 唯一真源"语义相同）
-            if (Vm is { } v)
-                forcePointEraser = !v.InkTool.IsStrokeEraser;
+            // 单一真源 = 画板自身的 EraserModeByStrokeSetting：应用前重新对齐 forcePointEraser，
+            // 保证与 Pivot 页签/UI 一致
+            forcePointEraser = !Settings.Canvas.EraserModeByStrokeSetting;
             if (forcePointEraser)
                 inkCanvas.EraserShape = new RectangleStylusShape(EraserDiameter, InkCircleCursor.EraserBoardHeight(EraserDiameter));
             else
@@ -121,34 +129,38 @@ namespace InkCanvasForPDF.Board
             CancelSingleFingerDragMode();
         }
 
-        /// <summary>Pivot 页签切换 → 面积擦/墨迹擦：与 PDF 侧共用 InkTool.IsStrokeEraser 与持久化设置；
+        /// <summary>Pivot 页签切换 → 面积擦/墨迹擦：只写画板自有设置（与 PDF 侧完全独立，不再改 PDF 的橡皮状态）；
         /// 橡皮激活时即时生效（菜单仅在激活时可打开；Loaded 回填页签时未激活不应用，避免误切画布模式）。</summary>
         private void BoardPivotEraser_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (_syncingBoardEraser) return;
             if (!isLoaded) return;
             bool byStroke = BoardPivotEraser.SelectedIndex == 1;
-            if (Vm is { } vm && vm.InkTool.IsStrokeEraser != byStroke)
+            if (Settings.Canvas.EraserModeByStrokeSetting != byStroke)
             {
-                vm.InkTool.IsStrokeEraser = byStroke;   // PDF 批注侧实时同步（EditingMode 绑定随之刷新）
-                vm.Settings.EraserModeByStrokeSetting = byStroke;
-                SettingsService.Save(vm.Settings);
+                Settings.Canvas.EraserModeByStrokeSetting = byStroke;
+                SaveSettingsToFile();
             }
             forcePointEraser = !byStroke;
             if (BoardEraser.Opacity != 1)   // 已激活（0.99）：即时切换 EraserShape/EditingMode，不关菜单；
                 ApplyBoardEraserMode();     // 未激活（Loaded 回填页签）不应用，避免误切画布模式
         }
 
-        /// <summary>橡皮粗细滑块（1-30）→ 实际 EraserSize=15+3.5x（MainWindow 监听统一刷两侧 EraserShape/光标/画板直径），
-        /// 并回写 EraserSizeSetting 持久化（同值守卫：菜单打开回填滑块不重复存盘）。</summary>
+        /// <summary>橡皮粗细滑块（1-30）→ 画板实际直径 = 15+3.5x，并即时刷新画板形状/光标；
+        /// 回写画板自有 EraserSizeSetting（与 PDF 侧完全独立）。</summary>
         private void BoardEraserSizeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
-            if (Vm is not { } vm) return;
-            vm.InkTool.EraserSize = InkToolViewModel.EraserSizeFromSlider(e.NewValue);
-            if (vm.Settings.EraserSizeSetting != (int)e.NewValue)
+            if (_syncingBoardEraser) return;
+            if (!isLoaded) return;
+            int size = (int)e.NewValue;
+            if (Settings.Canvas.EraserSizeSetting != size)
             {
-                vm.Settings.EraserSizeSetting = (int)e.NewValue;
-                SettingsService.Save(vm.Settings);
+                Settings.Canvas.EraserSizeSetting = size;
+                SaveSettingsToFile();
             }
+            SyncBoardEraserDiameter();
+            ApplyEraserShape();
+            ApplyEraserCursor();
         }
 
         // ────────── 手掌擦除 / 笔尖模式（画板橡皮菜单两页签各一份开关；逻辑与 PDF InkToolBar 同名处理器逐字一致）──────────

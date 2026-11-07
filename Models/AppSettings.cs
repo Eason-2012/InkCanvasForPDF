@@ -179,6 +179,56 @@ public class AppSettings
     [JsonPropertyName("viewboxBlackboardBottomMargin")]
     public double BlackboardBarBottomMargin { get; set; } = 5;
 
+    // ══ 默认选项（PDF 阅读页面；打开文档无该文档记忆时套用）══
+
+    /// <summary>默认笔模式：0=硬笔，1=软笔，2=荧光笔（默认 0=硬笔）。</summary>
+    [JsonPropertyName("defaultPdfPenMode")]
+    public int DefaultPdfPenMode { get; set; } = 0;
+
+    /// <summary>默认笔粗细（硬笔/软笔，1~30，默认 5）。</summary>
+    [JsonPropertyName("defaultPdfPenWidth")]
+    public double DefaultPdfPenWidth { get; set; } = 5;
+
+    /// <summary>默认荧光笔粗细（1~30，默认 5）。</summary>
+    [JsonPropertyName("defaultPdfHighlighterWidth")]
+    public double DefaultPdfHighlighterWidth { get; set; } = 5;
+
+    /// <summary>默认荧光笔不透明度（20~240，对应 alpha；默认 120）。</summary>
+    [JsonPropertyName("defaultPdfHighlighterAlpha")]
+    public int DefaultPdfHighlighterAlpha { get; set; } = 120;
+
+    /// <summary>默认画笔颜色索引（0~8，除黑白外按调色盘主题取色；默认 1=红）。</summary>
+    [JsonPropertyName("defaultPdfPenColor")]
+    public int DefaultPdfPenColor { get; set; } = 1;
+
+    /// <summary>默认调色盘主题：true=亮系（下拉框「浅色」档），false=暗系（「深色」档）；默认暗系。</summary>
+    [JsonPropertyName("defaultPdfColorLightTheme")]
+    public bool DefaultPdfColorLightTheme { get; set; } = false;
+
+    /// <summary>默认荧光笔颜色索引（101~106，默认 103=黄）。</summary>
+    [JsonPropertyName("defaultPdfHighlighterColor")]
+    public int DefaultPdfHighlighterColor { get; set; } = 103;
+
+    /// <summary>默认多指书写（默认关闭）。</summary>
+    [JsonPropertyName("defaultPdfMultiFinger")]
+    public bool DefaultPdfMultiFinger { get; set; } = false;
+
+    /// <summary>默认固定图形菜单（图形菜单置顶，默认关闭）。</summary>
+    [JsonPropertyName("defaultPdfShapePinned")]
+    public bool DefaultPdfShapePinned { get; set; } = false;
+
+    /// <summary>默认展开缩略图（默认关闭）。</summary>
+    [JsonPropertyName("defaultPdfThumbnailOpen")]
+    public bool DefaultPdfThumbnailOpen { get; set; } = false;
+
+    /// <summary>PDF 默认橡皮模式：0=面积擦，1=墨迹擦（默认 0=面积擦）。与画板橡皮默认值完全独立。</summary>
+    [JsonPropertyName("defaultPdfEraserMode")]
+    public int DefaultPdfEraserMode { get; set; } = 0;
+
+    /// <summary>PDF 默认橡皮粗细滑块值（1~30，实际直径 = 15 + 3.5 × 值；默认 10）。与画板橡皮默认值完全独立。</summary>
+    [JsonPropertyName("defaultPdfEraserSize")]
+    public int DefaultPdfEraserSize { get; set; } = 10;
+
     // ══ 数据存储 ══
 
     /// <summary>自动保存墨迹书写数据（侧车存储到 Data\Ink，不修改原 PDF）。关闭=完全停用（不读不写）。</summary>

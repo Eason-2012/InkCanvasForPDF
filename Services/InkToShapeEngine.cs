@@ -404,6 +404,9 @@ public sealed class InkToShapeEngine
         // 就地修改会把正常手写笔迹的平滑一起关掉。
         var attributes = _getDrawingAttributes().Clone();
         attributes.FitToCurve = false;
+        // 纠正后的图形一律用普通圆点笔尖：不套用毛笔斜椭圆（荧光笔笔画不进入纠正，无需处理矩形笔尖）
+        attributes.StylusTip = StylusTip.Ellipse;
+        attributes.StylusTipTransform = Matrix.Identity;
         return match.ShapeName switch
         {
             "Circle" => BuildCircle(match, attributes, scale),

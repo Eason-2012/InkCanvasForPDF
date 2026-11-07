@@ -777,9 +777,8 @@ public sealed class PrintDialogView : UserControl
         for (int i = sheet * _nUp; i < Math.Min(selected.Count, sheet * _nUp + _nUp); i++)
             indices.Add(selected[i]);
 
-        _pageLabel.Text = _nUp > 1
-            ? $"第 {sheet + 1} 张 / 共 {sheets} 张"
-            : $"第 {(indices.Count > 0 ? indices[0] + 1 : 1)} / {_pages.Length} 页";
+        // 预览按「张」计数：x = 当前第几张（1 起），y = 总张数；单页模式下即所选页序 / 选中总页数，与 PDF 页码无关
+        _pageLabel.Text = $"第 {sheet + 1} / {sheets} 页";
         UpdateRenderLabel();
 
         if (indices.Any(i => _pages[i] is null))

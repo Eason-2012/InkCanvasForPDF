@@ -222,6 +222,7 @@ public sealed class TimePressureController
         public readonly HashSet<(double X, double Y, float P)> Received = new();   // 已接受的输入点（判重用）
         public double LastSampleElapsedMs;   // 最近一次收点时刻（僵死判定用：有它才说明会话仍在收点）
         public bool InProgress;
+        public bool Frozen;             // 停止收点（保留已采样本）：双指手势保留墨迹时由宿主置位
         public bool Translucent;   // 半透明笔（荧光笔）：不做分批提交，避免接缝处重复绘制导致 alpha 叠加圆点
         public long Token;   // 会话令牌：延迟清理只在令牌仍匹配时生效，防误杀同设备的下一笔
     }
@@ -320,6 +321,15 @@ public sealed class TimePressureController
     /// <summary>中断指定设备的会话（手掌擦除等：只丢弃该设备的湿墨，不影响其他手指）。</summary>
     public void AbortStroke(int deviceId) => EndSession(deviceId);
 
+    /// <summary>停止全部会话继续收点，但保留已采样本与叠加层湿墨（供随后的收笔定格）。
+    /// 双指手势中断笔画但保留这一笔时调用；与 <see cref="AbortStroke()"/> 的区别只在"不销毁会话"。</summary>
+    public void FreezeCollectAll()
+    {
+        lock (_sync)
+            foreach (var session in _sessions.Values)
+                session.Frozen = true;
+    }
+
     /// <summary>指定设备当前是否有在绘会话（画板宿主据此跳过 StrokeVisual 自绘）。</summary>
     public bool HasSession(int deviceId)
     {
@@ -387,6 +397,8 @@ public sealed class TimePressureController
         {
             if (!_sessions.TryGetValue(deviceId, out var session) || !session.InProgress)
                 return;
+            if (session.Frozen)
+                return;   // 已停收点（双指手势保留墨迹）：拒绝后续采样，已有样本留给收笔定格
 
             // 批内逐点分摊时间戳：输入管线会成批递交采样（收笔减速段/抬笔包常合并），
             // 若批内所有点共用同一时刻，点龄相同 → 定格压力相同 → 末端宽度平台收不到针尖。
@@ -597,7 +609,9 @@ public sealed class TimePressureController
         Stroke? stroke = null;
         lock (_sync)
         {
-            if (_sessions.TryGetValue(deviceId, out var session) && session.Samples.Count >= 2)
+            // 原地点击（按下后不移动）：抬起点与落笔点坐标/压力相同，被判重拒收，会话只有 1 个采样点。
+            // 单点笔画即圆点（与原生 InkCanvas 的点击结果一致），不能按"至少 2 点"丢弃，否则多指书写/多触摸模式点按不留墨迹。
+            if (_sessions.TryGetValue(deviceId, out var session) && session.Samples.Count >= 1)
             {
                 var points = new StylusPointCollection(session.Samples.Count);
                 foreach (var sample in session.Samples)
@@ -727,7 +741,7 @@ public sealed class TimePressureController
             // 快照起点即「旧边界 - 重叠点」→ 提交段在窗口内恒为 [0, localMature-1]（含重叠点衔接）。
             var visual = _overlay.AddCommittedVisual(layer);
             using (var dc = visual.RenderOpen())
-                DrawStroke(dc, snapshot, 0, localMature - 1, now, capOnly: true, growMs);
+                DrawStroke(dc, snapshot, 0, localMature - 1, now, capOnly: true, snapFrom, growMs);
             lock (_sync)
             {
                 if (_sessions.TryGetValue(deviceId, out var session) && session.InProgress)
@@ -744,12 +758,13 @@ public sealed class TimePressureController
         if (count - 1 - growingFrom >= 1)
         {
             using var dc = _overlay.OpenGrowing(layer);
-            DrawStroke(dc, snapshot, growingFrom, count - 1, now, capOnly: false, growMs);
+            DrawStroke(dc, snapshot, growingFrom, count - 1, now, capOnly: false, snapFrom, growMs);
         }
     }
 
+    /// <summary>绘制一段湿墨。globalOffset = snapshot 首元素在整笔采样中的全局下标。</summary>
     private void DrawStroke(DrawingContext dc, List<TimePressureSample> snapshot, int from, int to,
-        double now, bool capOnly, double growMs)
+        double now, bool capOnly, int globalOffset, double growMs)
     {
         if (to - from < 1)
             return;
