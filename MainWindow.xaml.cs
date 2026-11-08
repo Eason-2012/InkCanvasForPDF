@@ -146,12 +146,13 @@ public partial class MainWindow : Window
             Board.ApplyHighlighterInkStyle(enabled);
         Board.ApplyHighlighterInkStyle(_viewModel.Settings.HighlighterInkStyleEnabled);   // 启动即同步一次
         // 触摸输入光标接管：整个应用（进程级 OverrideCursor）触摸时用全透明自绘光标替换系统触摸指针；
-        // 橡皮 / 开启「显示画笔光标」时保留原光标；鼠标来源自动恢复。
+        // 橡皮 / 选择 / 开启「显示画笔光标」时保留原光标；鼠标来源自动恢复。
         _touchCursorHider = new TouchCursorHider(
             this,
-            () => _viewModel.InkTool.ActiveTool == InkToolMode.Eraser   // PDF 橡皮
-                  || Board.IsEraserActive                              // 画板橡皮
-                  || _viewModel.InkTool.ShowPenCursor,                  // 开启画笔光标 → 保持
+            () => _viewModel.InkTool.ActiveTool == InkToolMode.Eraser     // PDF 橡皮
+                  || _viewModel.InkTool.ActiveTool == InkToolMode.Select  // PDF 选择：套索期间保留光标
+                  || Board.IsEraserActive                                 // 画板橡皮（含画板选择：选中即 forceEraser=true）
+                  || _viewModel.InkTool.ShowPenCursor,                    // 开启画笔光标 → 保持
             () => PresentationSource.FromVisual(this)?.CompositionTarget?.TransformToDevice.M11 ?? 1.0);
         SourceInitialized += (_, _) => _touchCursorHider?.Attach();   // 句柄就绪后挂 WM_MOUSEMOVE 钩子
         Closed += (_, _) =>
@@ -577,7 +578,7 @@ public partial class MainWindow : Window
             }
             var dialog = new iNKORE.UI.WPF.Modern.Controls.ContentDialog
             {
-                Title = $"更新日志（v{current}）",
+                Title = "更新日志",
                 Content = content,
                 CloseButtonText = "关闭",
                 Owner = this,

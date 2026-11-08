@@ -261,7 +261,7 @@
 
                             <ui:SettingsCard Header="多指书写">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="HandLeft" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                    <ic:FluentIcon Icon="People" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <ui:ToggleSwitch x:Name="ToggleDefaultPdfMultiFinger"
                                                  IsOn="{Binding Settings.DefaultPdfMultiFinger, Mode=TwoWay}"
@@ -280,6 +280,7 @@
                                         <Run x:Name="DefaultPdfPenWidthValue" Text="5"/>
                                     </TextBlock>
                                     <Slider x:Name="SliderDefaultPdfPenWidth"
+                                            IsMoveToPointEnabled="True"
                                             Minimum="1" Maximum="30" TickFrequency="1" IsSnapToTickEnabled="True"
                                             Width="220"
                                             ValueChanged="SliderDefaultPdfPenWidth_ValueChanged"/>
@@ -297,6 +298,7 @@
                                         <Run x:Name="DefaultPdfAlphaValue" Text="120"/>
                                     </TextBlock>
                                     <Slider x:Name="SliderDefaultPdfAlpha"
+                                            IsMoveToPointEnabled="True"
                                             Minimum="20" Maximum="240" TickFrequency="20" IsSnapToTickEnabled="True"
                                             Width="220"
                                             ValueChanged="SliderDefaultPdfAlpha_ValueChanged"/>
@@ -336,6 +338,7 @@
                                         <Run x:Name="DefaultEraserSizeValuePdf" Text="10"/>
                                     </TextBlock>
                                     <Slider x:Name="SliderDefaultEraserSizePdf"
+                                            IsMoveToPointEnabled="True"
                                             Minimum="1" Maximum="30" TickFrequency="1" IsSnapToTickEnabled="True"
                                             Width="220"
                                             ValueChanged="DefaultPdfEraserSizeSlider_ValueChanged"/>
@@ -354,7 +357,7 @@
 
                             <ui:SettingsCard Header="展开缩略图">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="DocumentPdf" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                    <ic:FluentIcon Icon="List" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <ui:ToggleSwitch x:Name="ToggleDefaultPdfThumbnailOpen"
                                                  IsOn="{Binding Settings.DefaultPdfThumbnailOpen, Mode=TwoWay}"
@@ -390,7 +393,8 @@
                                         <Run x:Name="FloatingBarScaleValue" Text="100%"/>
                                     </TextBlock>
                                     <Slider x:Name="FloatingBarScaleSlider"
-                                            Minimum="50" Maximum="150" TickFrequency="5" IsSnapToTickEnabled="True"
+                                            IsMoveToPointEnabled="True"
+                                            Minimum="50" Maximum="150" TickFrequency="1" IsSnapToTickEnabled="True"
                                             Width="220"
                                             ValueChanged="FloatingBarScaleSlider_ValueChanged"/>
                                 </DockPanel>
@@ -407,6 +411,7 @@
                                         <Run x:Name="FloatingBarBottomMarginValue" Text="16px"/>
                                     </TextBlock>
                                     <Slider x:Name="FloatingBarBottomMarginSlider"
+                                            IsMoveToPointEnabled="True"
                                             Minimum="0" Maximum="50" TickFrequency="1" IsSnapToTickEnabled="True"
                                             Width="220"
                                             Value="{Binding Settings.FloatingBarBottomMargin, Mode=TwoWay}"
@@ -425,6 +430,7 @@
                                         <Run x:Name="FloatingBarRightMarginValue" Text="16px"/>
                                     </TextBlock>
                                     <Slider x:Name="FloatingBarRightMarginSlider"
+                                            IsMoveToPointEnabled="True"
                                             Minimum="0" Maximum="50" TickFrequency="1" IsSnapToTickEnabled="True"
                                             Width="220"
                                             Value="{Binding Settings.FloatingBarRightMargin, Mode=TwoWay}"
@@ -443,7 +449,8 @@
                                         <Run x:Name="FloatingBarOpacityValue" Text="75%"/>
                                     </TextBlock>
                                     <Slider x:Name="FloatingBarOpacitySlider"
-                                            Minimum="0" Maximum="100" TickFrequency="5" IsSnapToTickEnabled="True"
+                                            IsMoveToPointEnabled="True"
+                                            Minimum="0" Maximum="100" TickFrequency="1" IsSnapToTickEnabled="True"
                                             Width="220"
                                             ValueChanged="FloatingBarOpacitySlider_ValueChanged"/>
                                 </DockPanel>
@@ -529,6 +536,7 @@
                                         <Run x:Name="DefaultBoardPenWidthValue" Text="5"/>
                                     </TextBlock>
                                     <Slider x:Name="SliderDefaultBoardPenWidth"
+                                            IsMoveToPointEnabled="True"
                                             Minimum="1" Maximum="30" TickFrequency="1" IsSnapToTickEnabled="True"
                                             Width="220"
                                             ValueChanged="SliderDefaultBoardPenWidth_ValueChanged"/>
@@ -546,6 +554,7 @@
                                         <Run x:Name="DefaultBoardAlphaValue" Text="140"/>
                                     </TextBlock>
                                     <Slider x:Name="SliderDefaultBoardAlpha"
+                                            IsMoveToPointEnabled="True"
                                             Minimum="20" Maximum="240" TickFrequency="20" IsSnapToTickEnabled="True"
                                             Width="220"
                                             ValueChanged="SliderDefaultBoardAlpha_ValueChanged"/>
@@ -576,6 +585,7 @@
                                         <Run x:Name="DefaultEraserSizeValueBoard" Text="10"/>
                                     </TextBlock>
                                     <Slider x:Name="SliderDefaultEraserSizeBoard"
+                                            IsMoveToPointEnabled="True"
                                             Minimum="1" Maximum="30" TickFrequency="1" IsSnapToTickEnabled="True"
                                             Width="220"
                                             ValueChanged="DefaultBoardEraserSizeSlider_ValueChanged"/>
@@ -606,7 +616,7 @@
 
                             <ui:SettingsCard Header="多指书写">
                                 <ui:SettingsCard.HeaderIcon>
-                                    <ic:FluentIcon Icon="HandLeft" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
+                                    <ic:FluentIcon Icon="People" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
                                 <ui:ToggleSwitch x:Name="ToggleDefaultBoardMultiTouch"
                                                  IsOn="{Binding Settings.Board.Defaults.MultiTouch, Mode=TwoWay}"
@@ -614,7 +624,7 @@
                                                  Toggled="DefaultOptionToggle_Toggled"/>
                             </ui:SettingsCard>
 
-                            <ui:SettingsCard Header="双指移动">
+                            <ui:SettingsCard x:Name="CardDefaultBoardTwoFingerPan" Header="双指移动">
                                 <ui:SettingsCard.HeaderIcon>
                                     <ic:FluentIcon Icon="ArrowMove" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
@@ -624,7 +634,7 @@
                                                  Toggled="DefaultOptionToggle_Toggled"/>
                             </ui:SettingsCard>
 
-                            <ui:SettingsCard Header="双指缩放">
+                            <ui:SettingsCard x:Name="CardDefaultBoardTwoFingerZoom" Header="双指缩放">
                                 <ui:SettingsCard.HeaderIcon>
                                     <ic:FluentIcon Icon="ZoomIn" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
@@ -634,7 +644,7 @@
                                                  Toggled="DefaultOptionToggle_Toggled"/>
                             </ui:SettingsCard>
 
-                            <ui:SettingsCard Header="双指旋转">
+                            <ui:SettingsCard x:Name="CardDefaultBoardTwoFingerRotate" Header="双指旋转">
                                 <ui:SettingsCard.HeaderIcon>
                                     <ic:FluentIcon Icon="ArrowRotateClockwise" IconVariant="Regular" IconSize="Resizable" FontSize="36"/>
                                 </ui:SettingsCard.HeaderIcon>
@@ -662,7 +672,8 @@
                                         <Run x:Name="BlackboardScaleValue" Text="100%"/>
                                     </TextBlock>
                                     <Slider x:Name="BlackboardScaleSlider"
-                                            Minimum="50" Maximum="150" TickFrequency="5" IsSnapToTickEnabled="True"
+                                            IsMoveToPointEnabled="True"
+                                            Minimum="50" Maximum="150" TickFrequency="1" IsSnapToTickEnabled="True"
                                             Width="220"
                                             ValueChanged="BlackboardScaleSlider_ValueChanged"/>
                                 </DockPanel>
@@ -679,6 +690,7 @@
                                         <Run x:Name="BlackboardBottomMarginValue" Text="5px"/>
                                     </TextBlock>
                                     <Slider x:Name="BlackboardBottomMarginSlider"
+                                            IsMoveToPointEnabled="True"
                                             Minimum="0" Maximum="50" TickFrequency="1" IsSnapToTickEnabled="True"
                                             Width="220"
                                             Value="{Binding Settings.BlackboardBarBottomMargin, Mode=TwoWay}"
@@ -697,7 +709,8 @@
                                         <Run x:Name="BlackboardOpacityValue" Text="75%"/>
                                     </TextBlock>
                                     <Slider x:Name="BlackboardOpacitySlider"
-                                            Minimum="0" Maximum="100" TickFrequency="5" IsSnapToTickEnabled="True"
+                                            IsMoveToPointEnabled="True"
+                                            Minimum="0" Maximum="100" TickFrequency="1" IsSnapToTickEnabled="True"
                                             Width="220"
                                             ValueChanged="BlackboardOpacitySlider_ValueChanged"/>
                                 </DockPanel>
@@ -756,6 +769,7 @@
                                         <Run x:Name="InkToShapeSensitivityValue" Text="75%"/>
                                     </TextBlock>
                                     <Slider x:Name="InkToShapeSensitivitySlider"
+                                            IsMoveToPointEnabled="True"
                                             Minimum="0" Maximum="100" TickFrequency="5" IsSnapToTickEnabled="True"
                                             Width="220"
                                             ValueChanged="InkToShapeSensitivitySlider_ValueChanged"/>
@@ -784,6 +798,7 @@
                                         <Run x:Name="PauseInkToShapeSensitivityValue" Text="75%"/>
                                     </TextBlock>
                                     <Slider x:Name="PauseInkToShapeSensitivitySlider"
+                                            IsMoveToPointEnabled="True"
                                             Minimum="0" Maximum="100" TickFrequency="5" IsSnapToTickEnabled="True"
                                             Width="220"
                                             ValueChanged="PauseInkToShapeSensitivitySlider_ValueChanged"/>

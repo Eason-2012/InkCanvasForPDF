@@ -71,7 +71,7 @@ public partial class SettingsView : System.Windows.Controls.UserControl
     {
         InitializeComponent();
         // 「查看更新日志」卡片描述：显示当前版本号（运行时取，不写死 XAML）
-        ViewChangelogCard.Description = $"当前版本：{UpdateService.CurrentVersion}";
+        ViewChangelogCard.Description = $"当前版本：v{UpdateService.CurrentVersion}";
         // 更新状态机/进度变化 → 重渲染状态区（本控件与应用同生命周期，构造期订阅一次即可；
         // ApplyUpdateState 带可选参不能直接方法组转换，用 lambda）
         UpdateService.StateChanged += () => ApplyUpdateState();
@@ -1035,6 +1035,17 @@ public partial class SettingsView : System.Windows.Controls.UserControl
         DefaultBoardAlphaValue.Text = ((int)SliderDefaultBoardAlpha.Value).ToString();
         DefaultEraserSizeValueBoard.Text = ((int)SliderDefaultEraserSizeBoard.Value).ToString();
         CardDefaultBoardAlpha.Visibility = d.PenKind == 2 ? Visibility.Visible : Visibility.Collapsed;
+        UpdateBoardTwoFingerDimState();   // 页面加载回填多指书写的初始状态（绑定不触发 Toggled，需显式同步）
+    }
+
+    /// <summary>多指书写联动变暗（对齐手势菜单 CheckEnableTwoFingerGestureBtnColorPrompt）：
+    /// 开 → 三张双指卡片 Opacity 0.5；关 → 恢复 1。仅变暗不禁点。</summary>
+    private void UpdateBoardTwoFingerDimState()
+    {
+        double o = ToggleDefaultBoardMultiTouch.IsOn ? 0.5 : 1;
+        CardDefaultBoardTwoFingerPan.Opacity = o;
+        CardDefaultBoardTwoFingerZoom.Opacity = o;
+        CardDefaultBoardTwoFingerRotate.Opacity = o;
     }
 
     /// <summary>橡皮粗细卡片：PDF / 画板各自按自己的橡皮模式判定（仅在面积擦=0 时显示）。</summary>
@@ -1225,6 +1236,7 @@ public partial class SettingsView : System.Windows.Controls.UserControl
     private void DefaultOptionToggle_Toggled(object sender, RoutedEventArgs e)
     {
         if (_syncingDefaultOptions || Vm is not { } vm) return;
+        if (ReferenceEquals(sender, ToggleDefaultBoardMultiTouch)) UpdateBoardTwoFingerDimState();
         SettingsService.Save(vm.Settings);
     }
 }

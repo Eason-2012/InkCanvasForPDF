@@ -195,6 +195,7 @@
                                                     </Grid.ColumnDefinitions>
                                                     <TextBlock FontSize="14" VerticalAlignment="Center" Foreground="{DynamicResource FloatBarForeground}" Text="粗细" />
                                                     <Slider x:Name="InkWidthSliderHard"
+                                                        IsMoveToPointEnabled="True"
                                                         Grid.Column="1"
                                                         Margin="10,0,0,0"
                                                         IsSnapToTickEnabled="True"
@@ -427,6 +428,7 @@
                                                     </Grid.ColumnDefinitions>
                                                     <TextBlock FontSize="14" VerticalAlignment="Center" Foreground="{DynamicResource FloatBarForeground}" Text="粗细" />
                                                     <Slider x:Name="InkWidthSliderSoft"
+                                                        IsMoveToPointEnabled="True"
                                                         Grid.Column="1"
                                                         Margin="10,0,0,0"
                                                         IsSnapToTickEnabled="True"
@@ -651,6 +653,7 @@
                                                     </Grid.ColumnDefinitions>
                                                     <TextBlock FontSize="14" VerticalAlignment="Center" Foreground="{DynamicResource FloatBarForeground}" Text="不透明度" />
                                                     <Slider x:Name="InkAlphaSlider"
+                                                        IsMoveToPointEnabled="True"
                                                         Grid.Column="1"
                                                         Margin="10,0,0,0"
                                                         IsSnapToTickEnabled="True"
@@ -672,6 +675,7 @@
                                                     </Grid.ColumnDefinitions>
                                                     <TextBlock FontSize="14" VerticalAlignment="Center" Foreground="{DynamicResource FloatBarForeground}" Text="粗细" />
                                                     <Slider x:Name="InkHighlighterWidthSlider"
+                                                        IsMoveToPointEnabled="True"
                                                         Grid.Column="1"
                                                         Margin="10,0,0,0"
                                                         IsSnapToTickEnabled="True"
@@ -868,6 +872,7 @@
                                                         </Grid.ColumnDefinitions>
                                                         <TextBlock FontSize="14" VerticalAlignment="Center" Foreground="{DynamicResource FloatBarForeground}" Text="粗细" />
                                                         <Slider x:Name="EraserSizeSlider"
+                                                            IsMoveToPointEnabled="True"
                                                             Grid.Column="1"
                                                             Margin="10,0,0,0"
                                                             IsSnapToTickEnabled="True"

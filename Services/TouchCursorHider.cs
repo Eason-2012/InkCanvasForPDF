@@ -7,7 +7,7 @@ using System.Windows.Interop;
 namespace InkCanvasForPDF.Services;
 
 /// <summary>触摸输入的光标接管：触摸来源的鼠标消息显示全透明光标（隐藏系统触摸指针），
-/// 真鼠标消息恢复应用原光标；橡皮/开启画笔光标时保持原样。
+/// 真鼠标消息恢复应用原光标；橡皮 / 选择 / 开启画笔光标时保持原样。
 /// 来源判别必须在窗口消息层做——触摸提升为鼠标后 WPF 事件的 StylusDevice 为 null，无法区分鼠标与触摸。</summary>
 internal sealed class TouchCursorHider : IDisposable
 {
@@ -16,7 +16,7 @@ internal sealed class TouchCursorHider : IDisposable
     private const long SignatureMask = 0xFFFFFF00;
 
     private readonly Window _window;
-    private readonly Func<bool> _shouldKeepCursor;   // true = 当前状态应保留光标（橡皮 / 开启画笔光标）
+    private readonly Func<bool> _shouldKeepCursor;   // true = 当前状态应保留光标（橡皮 / 选择 / 开启画笔光标）
     private readonly Func<double> _getDpiScale;
     private InkCircleCursor? _invisible;
     private HwndSource? _source;

@@ -1281,6 +1281,7 @@
                                                     Text="粗细" />
                                                 <Slider
                                                     x:Name="BoardInkWidthSlider"
+                                                    IsMoveToPointEnabled="True"
                                                     Grid.Column="1"
                                                     Margin="10,0,0,0"
                                                     VerticalAlignment="Center"
@@ -1577,6 +1578,7 @@
                                                     Text="粗细" />
                                                 <Slider
                                                     x:Name="BoardInkWidthSliderSoft"
+                                                    IsMoveToPointEnabled="True"
                                                     Grid.Column="1"
                                                     Margin="10,0,0,0"
                                                     VerticalAlignment="Center"
@@ -1843,6 +1845,7 @@
                                                     Text="不透明度" />
                                                 <Slider
                                                     x:Name="BoardInkAlphaSlider"
+                                                    IsMoveToPointEnabled="True"
                                                     Grid.Column="1"
                                                     Margin="10,0,0,0"
                                                     VerticalAlignment="Center"
@@ -1874,6 +1877,7 @@
                                                     Text="粗细" />
                                                 <Slider
                                                     x:Name="BoardInkHighlighterWidthSlider"
+                                                    IsMoveToPointEnabled="True"
                                                     Grid.Column="1"
                                                     Margin="10,0,0,0"
                                                     VerticalAlignment="Center"
@@ -2136,6 +2140,7 @@
                                                     </Grid.ColumnDefinitions>
                                                     <TextBlock FontSize="14" VerticalAlignment="Center" Foreground="{DynamicResource FloatBarForeground}" Text="粗细" />
                                                     <Slider x:Name="BoardEraserSizeSlider"
+                                                        IsMoveToPointEnabled="True"
                                                         Grid.Column="1"
                                                         Margin="10,0,0,0"
                                                         IsSnapToTickEnabled="True"
