@@ -522,12 +522,17 @@ public sealed class PdfRenderService : IDisposable
         order.Add(key);
     }
 
+    /// <summary>近似 LRU：写入项移到末尾；超页数上限时循环淘汰头部（原实现无条件 RemoveAt(0)，
+    /// 列表永远只剩 1 项 → 上限判断永不成立，缓存实际无上限增长）。</summary>
     private static void Cache<TValue>(List<long> order, Dictionary<long, TValue> cache, long key, int max)
     {
+        order.Remove(key);
         order.Add(key);
-        if (order.Count > max)
+        while (order.Count > max)
+        {
             cache.Remove(order[0]);
-        order.RemoveAt(0);
+            order.RemoveAt(0);
+        }
     }
 
     public void CloseDocument()
