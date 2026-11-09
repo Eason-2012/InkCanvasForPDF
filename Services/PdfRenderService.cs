@@ -27,11 +27,16 @@ public sealed class PdfRenderService : IDisposable
     /// <summary>缩略图渲染结果缓存上限（页）。</summary>
     private const int MaxCachedThumbnails = 96;
 
+    /// <summary>base 渲染缓存字节上限（对齐 KillerPDF 每标签 160MB）：页尺寸大或高 DPI 时，
+    /// 仅靠 8 页的页数上限不控总量，叠加字节预算后按"距离刚渲染页最远"淘汰。</summary>
+    private const long MaxCachedBaseBytes = 160L << 20;
+
     private IntPtr _doc;   // FPDF 文档句柄：OpenDocument 打开，服务生命周期内复用；所有访问持 PdfiumLock
     private int _pageCount;
 
     private readonly Dictionary<long, ImageSource> _baseCache = new();
     private readonly List<long> _baseLruOrder = new();
+    private long _baseCacheBytes;   // base 缓存位图像素字节合计（_baseCacheLock 保护）
     private readonly Dictionary<long, ImageSource> _thumbCache = new();
     private readonly List<long> _thumbLruOrder = new();
     private readonly object _thumbCacheLock = new();          // 后台缩略图渲染与 UI 清理共用
@@ -138,33 +143,42 @@ public sealed class PdfRenderService : IDisposable
         {
             // 渲染期间缓存被清（换文档/视口宽度变化）→ 丢弃过期写入，避免旧尺寸/旧文档位图混入新缓存。
             if (generation == _cacheGeneration)
-            {
-                _baseCache[key] = image;
-                Cache(_baseLruOrder, _baseCache, key, MaxCachedBasePages);
-            }
+                CacheBaseLocked(key, image, pageIndex);
         }
         return image;
     }
 
     /// <summary>后台渲染某一页的 hi-res 位图（并发上限 2；PdfiumLock 保证与缩略图互斥）。
     /// 位图在后台线程创建并冻结（BitmapSource.Create+Freeze），完成后由调用方 Dispatcher 回填 page.Image，
-    /// UI 线程只做赋值——高负载书写时渲染不占用 UI 帧。</summary>
-    public Task<ImageSource> RenderPageAsync(int pageIndex, int renderWidth, int baseWidth, int baseHeight, int rotation)
+    /// UI 线程只做赋值——高负载书写时渲染不占用 UI 帧。
+    /// token：PDFium 原生调用本身不可中断，取消点放在排到并发名额之后、开跑之前——
+    /// 已作废的请求就直接返回，不再白渲染一整页 ≈20MB。</summary>
+    public Task<ImageSource> RenderPageAsync(int pageIndex, int renderWidth, int baseWidth, int baseHeight,
+        int rotation, CancellationToken token = default)
         => Task.Run(() =>
         {
-            _pageRenderSem.Wait();
-            try { return RenderPage(pageIndex, renderWidth, baseWidth, baseHeight, rotation); }
+            _pageRenderSem.Wait(token);
+            try
+            {
+                token.ThrowIfCancellationRequested();
+                return RenderPage(pageIndex, renderWidth, baseWidth, baseHeight, rotation);
+            }
             finally { _pageRenderSem.Release(); }
-        });
+        }, token);
 
-    /// <summary>后台取某一页的 base 位图（语义同 <see cref="RenderPageBase"/>，LRU 缓存线程安全）。</summary>
-    public Task<ImageSource> RenderPageBaseAsync(int pageIndex, int renderWidth, int baseWidth, int baseHeight, int rotation)
+    /// <summary>后台取某一页的 base 位图（语义同 <see cref="RenderPageBase"/>，LRU 缓存线程安全；取消语义同 hi 路径）。</summary>
+    public Task<ImageSource> RenderPageBaseAsync(int pageIndex, int renderWidth, int baseWidth, int baseHeight,
+        int rotation, CancellationToken token = default)
         => Task.Run(() =>
         {
-            _pageRenderSem.Wait();
-            try { return RenderPageBase(pageIndex, renderWidth, baseWidth, baseHeight, rotation); }
+            _pageRenderSem.Wait(token);
+            try
+            {
+                token.ThrowIfCancellationRequested();
+                return RenderPageBase(pageIndex, renderWidth, baseWidth, baseHeight, rotation);
+            }
             finally { _pageRenderSem.Release(); }
-        });
+        }, token);
 
     /// <summary>后台渲染某一页的缩略图位图（并发上限 2，由 worker 环保证；PdfiumLock 保证与页面渲染互斥）。
     /// 请求进入优先级队列：可见区（当前滑动区域）优先，缓冲区按到可见区距离由近及远；
@@ -415,30 +429,40 @@ public sealed class PdfRenderService : IDisposable
         int contentPxW = Math.Max(1, (int)Math.Round(contentDipW * pxPerDip));
         int contentPxH = Math.Max(1, (int)Math.Round(contentDipH * pxPerDip));
 
-        byte[]? raw;
-        lock (PdfiumInterop.PdfiumLock)
+        // 像素缓冲走复用池：顺序渲染之间共享一块备用缓冲，避免每页新分配 ≈20MB 的大对象堆垃圾。
+        byte[] raw = PdfPixelBufferPool.Rent(checked(contentPxW * 4 * contentPxH));
+        try
         {
-            var doc = _doc;
-            if (doc == IntPtr.Zero)
-                throw new InvalidOperationException("文档未打开");
-            raw = PdfiumInterop.FPDF_RenderPage(doc, pageIndex, contentPxW, contentPxH);
+            bool ok;
+            lock (PdfiumInterop.PdfiumLock)
+            {
+                var doc = _doc;
+                if (doc == IntPtr.Zero)
+                    throw new InvalidOperationException("文档未打开");
+                ok = PdfiumInterop.FPDF_RenderPageInto(doc, pageIndex, contentPxW, contentPxH, raw);
+            }
+            if (!ok)
+                throw new InvalidOperationException($"PDFium 渲染失败 p{pageIndex}");
+
+            // 像素级旋转：输出宽高 = 旋转后的槽位像素，方向由 rotation 决定（不依赖 PDFium rotate 语义）
+            var (bytes, pxW, pxH) = BitmapHelpers.RotateBitmap(raw, contentPxW, contentPxH, rotation);
+
+            // 烘焙 DPI：位图 (pxW×pxH) 像素固定显示在 (baseWidth×baseHeight) DIP 面积，
+            // 缩放由 ScaleTransform 完成。BitmapSource.Create + Freeze：后台线程直接创建冻结位图
+            // （与缩略图同款模式），不依赖 UI 线程，最小化/恢复也不会像 WriteableBitmap 那样因
+            // BackBuffer surface 丢失而闪。
+            var bmp = BitmapSource.Create(pxW, pxH,
+                96.0 * pxW / Math.Max(1, baseWidth),
+                96.0 * pxH / Math.Max(1, baseHeight),
+                PixelFormats.Bgra32, null, bytes, pxW * 4);
+            bmp.Freeze();
+            return bmp;
         }
-        if (raw == null)
-            throw new InvalidOperationException($"PDFium 渲染失败 p{pageIndex}");
-
-        // 像素级旋转：输出宽高 = 旋转后的槽位像素，方向由 rotation 决定（不依赖 PDFium rotate 语义）
-        var (bytes, pxW, pxH) = BitmapHelpers.RotateBitmap(raw, contentPxW, contentPxH, rotation);
-
-        // 烘焙 DPI：位图 (pxW×pxH) 像素固定显示在 (baseWidth×baseHeight) DIP 面积，
-        // 缩放由 ScaleTransform 完成。BitmapSource.Create + Freeze：后台线程直接创建冻结位图
-        // （与缩略图同款模式），不依赖 UI 线程，最小化/恢复也不会像 WriteableBitmap 那样因
-        // BackBuffer surface 丢失而闪。
-        var bmp = BitmapSource.Create(pxW, pxH,
-            96.0 * pxW / Math.Max(1, baseWidth),
-            96.0 * pxH / Math.Max(1, baseHeight),
-            PixelFormats.Bgra32, null, bytes, pxW * 4);
-        bmp.Freeze();
-        return bmp;
+        finally
+        {
+            // BitmapSource.Create 已把像素拷入 WPF 非托管，缓冲可立即归还复用
+            PdfPixelBufferPool.Return(raw);
+        }
     }
 
     /// <summary>BGRA 像素 → PNG → 冻结 BitmapFrame（抄自 KillerPDF PageThumbnailVm.EncodeToBitmapSource）。
@@ -478,6 +502,7 @@ public sealed class PdfRenderService : IDisposable
         {
             _baseCache.Clear();
             _baseLruOrder.Clear();
+            _baseCacheBytes = 0;
         }
         lock (_thumbCacheLock)
         {
@@ -505,6 +530,7 @@ public sealed class PdfRenderService : IDisposable
         {
             _baseCache.Clear();
             _baseLruOrder.Clear();
+            _baseCacheBytes = 0;
         }
     }
 
@@ -532,6 +558,45 @@ public sealed class PdfRenderService : IDisposable
         {
             cache.Remove(order[0]);
             order.RemoveAt(0);
+        }
+    }
+
+    /// <summary>位图像素字节数（Bgra32 = 4 字节/像素；非 BitmapSource 返回 0）。</summary>
+    private static long BitmapBytes(ImageSource src) =>
+        src is BitmapSource b ? (long)b.PixelWidth * b.PixelHeight * 4 : 0;
+
+    /// <summary>写入 base 缓存（调用方持 _baseCacheLock）：双上限（页数 8 / 字节 160MB），
+    /// 超出时循环淘汰"页索引离刚渲染页最远"的项（对齐 KillerPDF：渲染围绕视口到达，
+    /// 保留附近页比纯 LRU 更贴合滚动局部性）。至少保留刚写入的这一项。</summary>
+    private void CacheBaseLocked(long key, ImageSource image, int pageIndex)
+    {
+        if (_baseCache.TryGetValue(key, out var old))
+            _baseCacheBytes -= BitmapBytes(old);
+        _baseCache[key] = image;
+        _baseCacheBytes += BitmapBytes(image);
+        Touch(_baseLruOrder, key);
+
+        while (_baseCache.Count > 1
+               && (_baseCache.Count > MaxCachedBasePages || _baseCacheBytes > MaxCachedBaseBytes))
+        {
+            long farthest = -1;
+            long bestDistance = -1;
+            foreach (var cachedKey in _baseCache.Keys)
+            {
+                if (cachedKey == key)
+                    continue;
+                long distance = Math.Abs(cachedKey / 4 - pageIndex);
+                if (distance > bestDistance)
+                {
+                    bestDistance = distance;
+                    farthest = cachedKey;
+                }
+            }
+            if (farthest < 0)
+                break;
+            if (_baseCache.Remove(farthest, out var removed))
+                _baseCacheBytes -= BitmapBytes(removed);
+            _baseLruOrder.Remove(farthest);
         }
     }
 

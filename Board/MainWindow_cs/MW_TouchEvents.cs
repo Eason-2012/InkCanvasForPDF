@@ -225,9 +225,6 @@ namespace InkCanvasForPDF.Board
 
         private void Main_Grid_TouchDown(object sender, TouchEventArgs e)
         {
-            if (_eraseGestureBatchGuard)
-                return;   // 双指手势已成立：保持 0.01 失效橡皮，禁止重设真实形状（含面积擦/墨迹擦分支）
-
             if (!isHidingSubPanelsWhenInking)
             {
                 isHidingSubPanelsWhenInking = true;
@@ -335,6 +332,15 @@ namespace InkCanvasForPDF.Board
             }
         }
 
+        /// <summary>双指手势期间彻底禁止擦除（同 PDF 侧）：命中测试器在落笔时锁定形状，中途换 0.01 无效；
+        /// 抬一指时 PreviewTouchUp 会把 EditingMode 恢复成擦除模式，剩下那根手指会重新擦 —— 只能逐次命中 Cancel。
+        /// 守卫 _eraseGestureBatchGuard 从第二指落下一直保持到全部抬指，正好覆盖整个手势。</summary>
+        private void inkCanvas_StrokeErasing(object sender, InkCanvasStrokeErasingEventArgs e)
+        {
+            if (_eraseGestureBatchGuard)
+                e.Cancel = true;
+        }
+
         private void inkCanvas_PreviewTouchDown(object sender, TouchEventArgs e)
         {
             dec.Add(e.TouchDevice.Id);
@@ -367,7 +373,6 @@ namespace InkCanvasForPDF.Board
                 if (dec.Count >= 2 && forceEraser)
                 {
                     _eraseGestureBatchGuard = true;
-                    inkCanvas.EraserShape = new EllipseStylusShape(0.01, 0.01);   // 手势期间橡皮物理失效：在途擦除立即失去命中面积
                     RevertEraseBatchForGesture();                                  // 回滚本触摸已擦内容
                 }
             }

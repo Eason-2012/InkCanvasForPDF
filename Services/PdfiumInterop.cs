@@ -100,41 +100,60 @@ internal static class PdfiumInterop
     /// <summary>将一页栅格化为 BGRA 像素（叠白 + 注释外观 + LCD 文本），始终按页面未旋转方向输出。
     /// 旋转由 PdfRenderService 在像素层完成。
     /// 持锁 LoadPage→渲染→ClosePage；句柄无效或渲染失败返回 null。
-    /// 缩略图/页面渲染共用此入口，由 PdfiumLock 串行保证线程安全。</summary>
+    /// 缩略图渲染使用此入口（小缓冲，不值得走池）。</summary>
     internal static byte[]? FPDF_RenderPage(IntPtr document, int pageIndex, int width, int height)
     {
         lock (PdfiumLock)
         {
             if (document == IntPtr.Zero || width <= 0 || height <= 0) return null;
+            var bytes = System.GC.AllocateUninitializedArray<byte>(checked(width * 4 * height));
+            return RenderPageIntoLocked(document, pageIndex, width, height, bytes) ? bytes : null;
+        }
+    }
+
+    /// <summary>同 <see cref="FPDF_RenderPage"/>，但复用调用方提供的缓冲（长度 ≥ width*height*4），
+    /// 避免每页新分配 ≈20MB 的大对象堆垃圾。成功返回 true，失败不写入可用内容。</summary>
+    internal static bool FPDF_RenderPageInto(IntPtr document, int pageIndex, int width, int height, byte[] target)
+    {
+        lock (PdfiumLock)
+        {
+            if (document == IntPtr.Zero || width <= 0 || height <= 0) return false;
+            if (target.Length < checked(width * 4 * height)) return false;
+            return RenderPageIntoLocked(document, pageIndex, width, height, target);
+        }
+    }
+
+    /// <summary>栅格化核心（调用方必须持 PdfiumLock）：LoadPage → 铺白 + 渲染 → ClosePage。
+    /// 输出 BGRA，stride = width*4。</summary>
+    private static bool RenderPageIntoLocked(IntPtr document, int pageIndex, int width, int height, byte[] target)
+    {
+        try
+        {
+            IntPtr page = FPDF_LoadPageRaw(document, pageIndex);
+            if (page == IntPtr.Zero) return false;
             try
             {
-                IntPtr page = FPDF_LoadPageRaw(document, pageIndex);
-                if (page == IntPtr.Zero) return null;
+                int stride = checked(width * 4);
+                var pinned = GCHandle.Alloc(target, GCHandleType.Pinned);
                 try
                 {
-                    int stride = checked(width * 4);
-                    var bytes = new byte[checked(stride * height)];
-                    var pinned = GCHandle.Alloc(bytes, GCHandleType.Pinned);
+                    IntPtr bitmap = FPDFBitmap_CreateExRaw(
+                        width, height, FPDFBitmapBgra, pinned.AddrOfPinnedObject(), stride);
+                    if (bitmap == IntPtr.Zero) return false;
                     try
                     {
-                        IntPtr bitmap = FPDFBitmap_CreateExRaw(
-                            width, height, FPDFBitmapBgra, pinned.AddrOfPinnedObject(), stride);
-                        if (bitmap == IntPtr.Zero) return null;
-                        try
-                        {
-                            FPDFBitmap_FillRectRaw(bitmap, 0, 0, width, height, 0xFFFFFFFF);
-                            FPDF_RenderPageBitmapRaw(bitmap, page, 0, 0, width, height, 0,
-                                FpdfAnnot | FpdfLcdText);
-                        }
-                        finally { FPDFBitmap_DestroyRaw(bitmap); }
-                        return bytes;
+                        FPDFBitmap_FillRectRaw(bitmap, 0, 0, width, height, 0xFFFFFFFF);
+                        FPDF_RenderPageBitmapRaw(bitmap, page, 0, 0, width, height, 0,
+                            FpdfAnnot | FpdfLcdText);
                     }
-                    finally { pinned.Free(); }
+                    finally { FPDFBitmap_DestroyRaw(bitmap); }
+                    return true;
                 }
-                finally { FPDF_ClosePageRaw(page); }
+                finally { pinned.Free(); }
             }
-            catch { return null; }
+            finally { FPDF_ClosePageRaw(page); }
         }
+        catch { return false; }
     }
 }
 #pragma warning restore SYSLIB1054

@@ -543,8 +543,8 @@ namespace InkCanvasForPDF.Board
         public void ApplyEraserCursor()
         {
             double width = _palmEraseWidth > 0 ? _palmEraseWidth : EraserDiameter;
-            // >0.01 才算没变（0.01 挡浮点噪声）：手掌 footprint 逐次浮动，原 1 DIP 阈值会停旧尺寸 → 洞比光标大一圈
-            if (_eraserCursor == null || Math.Abs(_eraserCursorWidth - width) > 0.01)
+            // 直径变化 ≥1 DIP 才重建（亚像素差异不可见，避免每次落掌重建位图）
+            if (_eraserCursor == null || Math.Abs(_eraserCursorWidth - width) >= 1.0)
             {
                 double dpi = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
                 var created = InkCircleCursor.CreateEraserBoard(width, dpi);

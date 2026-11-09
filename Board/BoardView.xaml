@@ -54,6 +54,7 @@
             PreviewTouchUp="inkCanvas_PreviewTouchUp"
             SelectionChanged="inkCanvas_SelectionChanged"
             StrokeCollected="inkCanvas_StrokeCollected"
+            StrokeErasing="inkCanvas_StrokeErasing"
             TouchDown="Main_Grid_TouchDown"
             TouchMove="inkCanvas_TouchMove"
             TouchUp="Main_Grid_TouchUp" />

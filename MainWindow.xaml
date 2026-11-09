@@ -474,6 +474,7 @@
                                                        SelectionChanged="PageInkCanvas_SelectionChanged"
                                                        PreviewMouseDown="InkCanvas_PreviewMouseDown"
                                                        PreviewMouseUp="InkCanvas_PreviewMouseUp"
+                                                       StrokeErasing="PageCanvas_StrokeErasing"
                                                        TouchUp="InkCanvas_TouchUp"
                                                        MouseDown="PageCanvas_ShapeMouseDown"
                                                        MouseMove="PageCanvas_ShapeMouseMove"

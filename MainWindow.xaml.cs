@@ -46,6 +46,7 @@ public partial class MainWindow : Window
     private long _pdfFirstTouchDownMs;                       // 第一指落笔时刻（Environment.TickCount64，0=无）
     private bool _pdfGestureKeepStroke;                       // 本次手势是否保留被中断笔画
     private readonly Dictionary<InkCanvas, bool> _gestureKeepPending = new();   // 该画布待保留的那一笔尚未提交
+    private readonly Dictionary<InkCanvas, InkTraceCollector> _inkTraceCollectors = new();   // 在绘点采集（停墨保留重建用）
     private bool _pendingInkRestore;          // 手势结束后的恢复已排队（防重复调度）
     private bool _wasHidden;          // 窗口曾最小化：恢复前台时用多帧 Opacity 遮罩掩盖位图纹理重传白闪
     private EventHandler? _restoreFrameHandler;   // 多帧遮罩的渲染帧订阅
@@ -84,7 +85,7 @@ public partial class MainWindow : Window
     private readonly HashSet<int> _dirtyThumbPages = new();               // 待刷新缩略图的页号（0-based，墨迹变更去抖）
     private DispatcherTimer? _thumbInkTimer;
     private InkCircleCursor? _inkCursor;                                                    // 自定义墨迹光标（橡皮=黑板擦 / 批注笔尖=与笔尖同形，消除"小一圈"）
-    private TouchCursorHider? _touchCursorHider;                                             // 触摸输入的全透明光标接管（整个应用，进程级 OverrideCursor）
+    // private TouchCursorHider? _touchCursorHider;                                             // 暂停触摸透明光标接管（TouchCursorHider）：先恢复默认光标，待问题修复后取消注释
     private double _inkCursorWidth;                                                         // 当前光标宽（屏幕 DIP），变化 ≥0.01 才重建
     private double _inkCursorHeight;                                                        // 当前光标高（屏幕 DIP，荧光笔竖长方形宽高不等）
     private bool _inkCursorIsRect;                                                          // 当前光标是否矩形笔尖（缓存键之一）
@@ -145,21 +146,22 @@ public partial class MainWindow : Window
         SettingsView.HighlighterInkStyleChanged += enabled =>      // 荧光笔墨迹样式即时同步画板笔尖
             Board.ApplyHighlighterInkStyle(enabled);
         Board.ApplyHighlighterInkStyle(_viewModel.Settings.HighlighterInkStyleEnabled);   // 启动即同步一次
+        // 暂停触摸透明光标接管（TouchCursorHider）：先恢复默认光标，待问题修复后取消注释。
         // 触摸输入光标接管：整个应用（进程级 OverrideCursor）触摸时用全透明自绘光标替换系统触摸指针；
         // 橡皮 / 选择 / 开启「显示画笔光标」时保留原光标；鼠标来源自动恢复。
-        _touchCursorHider = new TouchCursorHider(
-            this,
-            () => _viewModel.InkTool.ActiveTool == InkToolMode.Eraser     // PDF 橡皮
-                  || _viewModel.InkTool.ActiveTool == InkToolMode.Select  // PDF 选择：套索期间保留光标
-                  || Board.IsEraserActive                                 // 画板橡皮（含画板选择：选中即 forceEraser=true）
-                  || _viewModel.InkTool.ShowPenCursor,                    // 开启画笔光标 → 保持
-            () => PresentationSource.FromVisual(this)?.CompositionTarget?.TransformToDevice.M11 ?? 1.0);
-        SourceInitialized += (_, _) => _touchCursorHider?.Attach();   // 句柄就绪后挂 WM_MOUSEMOVE 钩子
-        Closed += (_, _) =>
-        {
-            _touchCursorHider?.Dispose();   // 进程级 OverrideCursor 必须清空，避免影响其它窗口
-            _touchCursorHider = null;
-        };
+        //_touchCursorHider = new TouchCursorHider(
+        //    this,
+        //    () => _viewModel.InkTool.ActiveTool == InkToolMode.Eraser     // PDF 橡皮
+        //          || _viewModel.InkTool.ActiveTool == InkToolMode.Select  // PDF 选择：套索期间保留光标
+        //          || Board.IsEraserActive                                 // 画板橡皮（含画板选择：选中即 forceEraser=true）
+        //          || _viewModel.InkTool.ShowPenCursor,                    // 开启画笔光标 → 保持
+        //    () => PresentationSource.FromVisual(this)?.CompositionTarget?.TransformToDevice.M11 ?? 1.0);
+        //SourceInitialized += (_, _) => _touchCursorHider?.Attach();   // 句柄就绪后挂 WM_MOUSEMOVE 钩子
+        //Closed += (_, _) =>
+        //{
+        //    _touchCursorHider?.Dispose();   // 进程级 OverrideCursor 必须清空，避免影响其它窗口
+        //    _touchCursorHider = null;
+        //};
         SettingsView.PenStyleChanged += style =>   // 笔锋样式全局唯一：设置页改 → 画板即时跟随
         {
             BoardView.Settings.Canvas.InkStyle = style;
@@ -339,9 +341,10 @@ public partial class MainWindow : Window
             new EventHandler<TouchEventArgs>(PdfView_PreviewTouchMove), true);
         PagesScrollViewer.AddHandler(UIElement.PreviewTouchUpEvent,
             new EventHandler<TouchEventArgs>(PdfView_PreviewTouchUp), true);
+        // 暂停触摸透明光标接管（TouchCursorHider）：先恢复默认光标，待问题修复后取消注释。
         // 触摸兜底：部分设备触摸不提升为鼠标消息，按下即接管光标（橡皮/画笔光标开关的保留判定在此内部处理）
-        AddHandler(UIElement.PreviewTouchDownEvent,
-            new EventHandler<TouchEventArgs>(GlobalPreviewTouchDown_HideCursor), true);
+        //AddHandler(UIElement.PreviewTouchDownEvent,
+        //    new EventHandler<TouchEventArgs>(GlobalPreviewTouchDown_HideCursor), true);
         // 缩放（整层 ScaleTransform）变化时同步给墨迹工具：画笔粗细按 DisplayScale 抵消，保证"粗细"设几屏幕就是几。
         _viewModel.PropertyChanged += (_, e) =>
         {
@@ -430,7 +433,7 @@ public partial class MainWindow : Window
             // 工具切换 / 橡皮粗细 / 画笔粗细 / 画笔光标开关（ShowPenCursor 变更会通知 ForceCursor）变化时刷新自定义光标。
             UpdateInkCursor();
             RefreshTimePressureArmed();   // 笔锋样式/工具/颜色变化时重算时间笔锋武装状态
-            _touchCursorHider?.Refresh();   // 切橡皮 / 开关「显示画笔光标」时，触摸态下的光标接管即时跟随
+            // _touchCursorHider?.Refresh();   // 切橡皮 / 开关「显示画笔光标」时，触摸态下的光标接管即时跟随（暂停：透明光标接管已停用）
         };
         // 最小化/恢复：StateChanged 必定触发（IsVisibleChanged 对最小化不可靠）。
         // 最小化时暂停渲染/释放定时器；恢复前台用多帧 Opacity 遮罩：让 WPF 渲染目标重建
@@ -1128,22 +1131,35 @@ public partial class MainWindow : Window
             if (binding == null)
                 continue;
             int strokesBefore = canvas.Strokes.Count;
+            bool wasInk = canvas.EditingMode == InkCanvasEditingMode.Ink;   // 切 None 后就丢了原模式，先记
+            bool hasTrace = _inkTraceCollectors.TryGetValue(canvas, out var trace) && trace.HasPending;
             if (!_suppressedStrokeBase.ContainsKey(canvas))
                 _suppressedStrokeBase[canvas] = strokesBefore;   // 基线只记一次：恢复时删掉手势期间新增的全部笔画
             _suppressedEditingBindings[canvas] = binding.ParentBinding;
-            if (_pdfGestureKeepStroke)
+            if (_pdfGestureKeepStroke && hasTrace)
                 _gestureKeepPending[canvas] = true;   // 必须在切 None 之前登记：提交可能发生在切换瞬间，守卫要消费它
             BindingOperations.ClearBinding(canvas, modeProperty);
             canvas.EditingMode = InkCanvasEditingMode.None;
-            // 第 1 指落下时 InkCanvas 已开始一笔；切 None 时 WPF 可能把它提交而不是丢弃 →
-            // 手势结束后会残留一小截墨迹。这里把本次输入新增的笔画移除（CodeInput 门：不写撤销历史；
+            // 第 1 指落下时 InkCanvas 已开始一笔；切 None 时 WPF 会丢弃在绘湿墨（多数情况下直接丢，抬笔也不再提交）→
+            // 不处理就整笔消失。这里把本次输入新增的笔画移除（CodeInput 门：不写撤销历史；
             // PageStrokes_StrokesChanged 的笔画级订阅/_strokePage 簿记仍随事件正常回收）。
             if (_pdfGestureKeepStroke)
             {
-                // 保留：已提交的把手势基线抬到它之后（RestoreSuppressedInk 就不会删它）；
-                // 未提交的等抬指后的延迟提交，由 PageInkCanvas_StrokeCollected 守卫消费保留
                 if (canvas.Strokes.Count > strokesBefore)
+                {
+                    // WPF 这次确实提交了：保住这一笔，把手势基线抬到它之后（RestoreSuppressedInk 不会删）
                     _suppressedStrokeBase[canvas] = canvas.Strokes.Count;
+                    _gestureKeepPending[canvas] = false;
+                }
+                else if (wasInk && hasTrace && trace!.TryTake(out var keptPoints))
+                {
+                    // WPF 丢弃了湿墨且抬笔不会再提交：用采集点重建这一笔，走正常收笔处理
+                    RebuildStrokeFromPoints(canvas, keptPoints);
+                    _suppressedStrokeBase[canvas] = canvas.Strokes.Count;
+                    _gestureKeepPending[canvas] = false;
+                    ConsoleLog.Write("PDF双指手势", $"停墨保留重建: 点数={keptPoints.Count}");
+                }
+                // 其余情况（无采集点/非 Ink 模式）：保留 keepPending，等抬指后的延迟提交由守卫消费
             }
             else if (canvas.Strokes.Count > strokesBefore)
             {
@@ -1164,8 +1180,6 @@ public partial class MainWindow : Window
         }
         if (_viewModel.InkTool.ActiveTool != InkToolMode.Eraser)
             FlushEraserBatch();   // 手掌擦除批处理照旧落账；橡皮批处理手势期间只累积，结束时统一回滚
-        if (_viewModel.InkTool.ActiveTool == InkToolMode.Eraser)
-            SuppressEraserForGesture();   // 全部页画布橡皮物理失效（手势期间禁止任何路径恢复真实形状）
         _inkGestureSuppressed = true;
     }
 
@@ -1531,6 +1545,11 @@ public partial class MainWindow : Window
                 tryPauseRecognizeAsync: (deviceId, pending) =>
                     TryPauseRecognizeProvisionalPdfAsync(pageCanvasForPause, deviceId, pending));
         }
+
+        // 在绘点采集：双指手势保留时用它重建被 WPF 丢弃的湿墨（Loaded 可多次触发，先释放旧的）
+        if (_inkTraceCollectors.Remove(inkCanvas, out var oldTrace))
+            oldTrace.Dispose();
+        _inkTraceCollectors[inkCanvas] = new InkTraceCollector(inkCanvas);
     }
 
     /// <summary>停顿强制识别触发门（PDF 宿主）：画笔工具、非荧光笔、非形状模式、内建墨迹模式。
@@ -1592,8 +1611,14 @@ public partial class MainWindow : Window
     /// <summary>用追踪器采集的点重建在绘笔画并补入画布：模式切换会丢弃湿墨，必须自己补回，否则墨迹直接消失。
     /// 补入后走既有收笔处理（伪压力 / 时间笔锋定格 + 正常识别排队），与正常收笔完全一致。</summary>
     private Stroke? RebuildPendingStroke(InkCanvas canvas, IReadOnlyList<StylusPoint> pending)
+        => pending.Count < 2 ? null : RebuildStrokeFromPoints(canvas, pending);
+
+    /// <summary>用给定点集重建一条笔画：克隆当前画笔属性 → 入集合（StrokesChanged → 正常入撤销历史）
+    /// → 补发 StrokeCollected 走既有收笔处理（伪压力/笔锋/墨迹纠正/时间笔锋定格）。
+    /// 单点也保留（原地点击即圆点，与原生 InkCanvas 一致）；空格集返回 null。</summary>
+    private Stroke? RebuildStrokeFromPoints(InkCanvas canvas, IReadOnlyList<StylusPoint> pending)
     {
-        if (pending.Count < 2)
+        if (pending.Count < 1)
             return null;
         var stroke = new Stroke(new StylusPointCollection(pending))
         {
@@ -1637,6 +1662,9 @@ public partial class MainWindow : Window
         // 停顿强制识别追踪器随页面释放（新文档重建容器时防定时器与事件订阅泄漏）
         if (_pauseTrackers.Remove(pageCanvas, out var tracker))
             tracker.Dispose();
+        // 在绘点采集器随页面释放
+        if (_inkTraceCollectors.Remove(pageCanvas, out var trace))
+            trace.Dispose();
     }
 
     /// <summary>把「时间笔锋是否可用」（时间笔锋 + 画笔模式 + 非荧光笔）与缩放/压感开关同步给所有页面控制器。
@@ -1722,29 +1750,13 @@ public partial class MainWindow : Window
     }
 
     private void UpdateEraserShapes()
-    {
-        // 双指手势期间缩放会改 DisplayScale → 本方法被反复触发；必须保持 0.01 失效态，
-        // 否则擦除洞恢复真实尺寸 → 双指缩放全程擦除（抬手后才被回滚）
-        if (_inkGestureSuppressed && _viewModel.InkTool.ActiveTool == InkToolMode.Eraser)
-        {
-            SuppressEraserForGesture();
-            return;
-        }
-        ApplyEraserShapeForMode(_viewModel.InkTool.IsStrokeEraser);
-    }
+        => ApplyEraserShapeForMode(_viewModel.InkTool.IsStrokeEraser);
 
-    /// <summary>双指手势期间橡皮物理失效（WPF 在途擦除打不断，只能把形状换成 0.01 微型椭圆）。
-    /// 手势结束前禁止任何路径把真实形状写回。</summary>
-    private void SuppressEraserForGesture()
-    {
-        foreach (var canvas in _pageInkCanvases)
-            canvas.EraserShape = new EllipseStylusShape(0.01, 0.01);
-    }
-
-    /// <summary>触摸兜底：某些设备触摸不提升为鼠标消息，按下即接管光标（保留判定在 TouchCursorHider 内）。
-    /// 与 WM_MOUSEMOVE 判别互补，避免这类设备触摸时残留系统触摸指针。</summary>
-    private void GlobalPreviewTouchDown_HideCursor(object? sender, TouchEventArgs e)
-        => _touchCursorHider?.OnTouchInput();
+    // 暂停触摸透明光标接管（TouchCursorHider）：先恢复默认光标，待问题修复后取消注释。
+    // 触摸兜底：某些设备触摸不提升为鼠标消息，按下即接管光标（保留判定在 TouchCursorHider 内）。
+    // 与 WM_MOUSEMOVE 判别互补，避免这类设备触摸时残留系统触摸指针。
+    //private void GlobalPreviewTouchDown_HideCursor(object? sender, TouchEventArgs e)
+    //    => _touchCursorHider?.OnTouchInput();
 
     /// <summary>更新页面画布光标（消除"小一圈"）：WPF 内置光标不乘祖先的整层 ScaleTransform
     /// （dotnet/wpf EditBehavior.GetElementTransformMatrix 只读 InkCanvas 自身变换），DisplayScale≠1 时
@@ -1794,9 +1806,8 @@ public partial class MainWindow : Window
         // 光标尺寸严格跟随笔迹（不设最小下限）；上限 256 DIP 由 InkCircleCursor.Create 等比处理
         bool isEraser = customEraser;
         var color = isEraser ? Colors.White : _viewModel.InkTool.DrawingAttributes.Color;
-        // 宽或高变化 >0.01 DIP 或 形状/旋转/颜色/样式变化 就重建（0.01 只挡浮点噪声：手掌 footprint 逐次浮动，
-        // 原 1 DIP 阈值会停在上一次尺寸 → 擦除洞比光标大一圈；尺寸不变的重复调用仍走缓存）
-        if (_inkCursor == null || Math.Abs(_inkCursorWidth - w) > 0.01 || Math.Abs(_inkCursorHeight - h) > 0.01 ||
+        // 宽或高变化 ≥1 DIP 或 形状/旋转/颜色/样式变化 就重建（亚像素差异不可见，避免每次落掌重建位图）
+        if (_inkCursor == null || Math.Abs(_inkCursorWidth - w) >= 1.0 || Math.Abs(_inkCursorHeight - h) >= 1.0 ||
             _inkCursorIsRect != isRect || _inkCursorRotateDeg != rotateDeg ||
             _inkCursorColor != color || _inkCursorIsEraser != isEraser)
         {
@@ -2123,9 +2134,6 @@ public partial class MainWindow : Window
         if (_palmEraseCanvases.Contains(inkCanvas))
             return;
 
-        if (_inkGestureSuppressed)
-            return;   // 双指手势期间保持 0.01 失效橡皮，禁止重设回真实形状
-
         if (_viewModel.InkTool.ActiveTool == InkToolMode.Eraser && !_viewModel.InkTool.IsStrokeEraser)
         {
             // 与 UpdateEraserShapes 同款补偿：页面坐标 ÷ DisplayScale，屏幕擦除洞恒为 EraserSize
@@ -2179,6 +2187,15 @@ public partial class MainWindow : Window
 
         _palmEraseCanvases.Add(canvas);
         UpdateInkCursor();   // 手掌擦除期间光标切为橡皮（尺寸=手掌洞），抬手/卸载恢复
+    }
+
+    /// <summary>双指手势期间彻底禁止擦除：WPF 的擦除命中测试器在落笔时锁定 EraserShape
+    /// （EraserBehavior.StylusInputBegin），中途换形状对在途擦除无效；StrokeErasing 是命中回调里
+    /// 真正删笔画之前的最后一道闸，Cancel 后笔画集合完全不动（含在途会话与手势中重新建立的会话）。</summary>
+    private void PageCanvas_StrokeErasing(object? sender, InkCanvasStrokeErasingEventArgs e)
+    {
+        if (_inkGestureSuppressed)
+            e.Cancel = true;
     }
 
     /// <summary>面积擦抬起（鼠标）：提交并复位擦除批处理。</summary>
