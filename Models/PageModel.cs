@@ -64,4 +64,26 @@ public sealed class PageModel : ViewModelBase
         get => _image;
         set => SetField(ref _image, value);
     }
+
+    private bool _isMaterialized;
+
+    /// <summary>墨迹画布是否已挂载：只有可见范围 ±缓冲 的页为 true，
+    /// 其余页只保留轻量页槽与墨迹数据（Strokes 仍在模型上）。</summary>
+    public bool IsMaterialized
+    {
+        get => _isMaterialized;
+        set
+        {
+            if (_isMaterialized == value)
+                return;
+            _isMaterialized = value;
+            // 先更新 Content 再更新模板开关：挂载时模板实例化的 DataContext 已就绪；
+            // 卸载时先清 Content（销毁视觉、触发 Unloaded）再撤模板
+            OnPropertyChanged(nameof(MaterializedContent));
+            OnPropertyChanged(nameof(IsMaterialized));
+        }
+    }
+
+    /// <summary>挂载时返回自身，未挂载返回 null：ContentControl 在 Content 与模板均为空时不生成视觉子树。</summary>
+    public object? MaterializedContent => _isMaterialized ? this : null;
 }

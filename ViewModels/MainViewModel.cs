@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Ink;
@@ -36,7 +37,8 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     private const int ReleaseIdleMs = 1000;    // 无缩放/滚动空闲多久释放内存
     private const int OpenReadyPollMs = 100;      // 首屏就绪轮询间隔
     private const int OpenReadyTimeoutMs = 15000; // 就绪兜底时限：超时强制撤加载页（渲染失败不卡死）
-    private const int RebuildPageSliceMs = 8;     // 页面容器拆除/填充时间片：每片让帧一次，圆圈动画不冻结
+    private const double ScrollBarAllowance = 18;  // 页面列宽预留的纵向滚动条宽度（DIP）
+    private const int MaterializeBufferPages = 1;  // 墨迹画布挂载缓冲：可见范围上下各多挂 1 页（防书写中滚出被断笔）
     /// <summary>缩放倍率：每档固定 ×1.1，保证各倍率下滚轮手感一致。</summary>
     public const double ZoomStepFactor = 1.1;
 
@@ -46,7 +48,18 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     private int _targetPageWidth = 760;
     private int _loadedStartIndex = -1;
     private int _loadedEndIndex = -1;
-    private readonly HashSet<int> _pendingPageRenders = new();   // 页面渲染单飞去重（仅 UI 线程访问）
+    /// <summary>在途页面渲染（键=页索引）：单飞去重 + 可取消 + 在途字节记账（仅 UI 线程访问）。</summary>
+    private readonly Dictionary<int, PendingPageRender> _pendingPageRenders = new();
+    private long _inflightRenderBytes;                // 在途渲染的估算像素字节合计
+    /// <summary>在途渲染字节上限：超过时取消离可见区最远的一页，避免滚动时多张 ≈20MB 位图同时驻留。</summary>
+    private const long MaxInflightRenderBytes = 200L << 20;
+
+    /// <summary>一次在途页面渲染：取消源 + 估算像素字节（完成回填时按此扣减）。</summary>
+    private sealed class PendingPageRender(CancellationTokenSource cts, long estimatedBytes)
+    {
+        internal CancellationTokenSource Cts { get; } = cts;
+        internal long EstimatedBytes { get; } = estimatedBytes;
+    }
     private int _lastRequestFirst = -1;   // 最近一次 LoadPageImages 的可见范围与 needHi
     private int _lastRequestLast = -1;    // （完成回调据此重算该页当前期望宽度）
     private bool _lastRequestNeedHi;
@@ -59,9 +72,11 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     private DispatcherTimer? _scrollDebounceTimer;   // 滚动停止：只补 base，不清晰
     private DispatcherTimer? _sharpenTimer;          // 缩放停止：清晰当前页一次
     private DispatcherTimer? _releaseTimer;          // 空闲 1s：hi→base 释放内存
+    private long _lastLohCompactTickMs;              // 空闲 LOH 压缩节流（距上次 ≥10s 才再压缩）
     private DispatcherTimer? _openReadyTimer;        // 首屏就绪轮询：视口可见页位图齐了才撤加载页
     private int _openReadyElapsedMs;                 // 已轮询时长（超时兜底）
     private bool _isRebuildingPages;                 // ReloadPages 进行中：Pages 与 _pageTopDips 处于不一致中间态，抑制滚动驱动处理
+    private bool _restoringView;                     // 打开文档恢复位置期间：屏蔽视口宽度变化引起的滚动补偿
     private double _widthFit = 1.0;                  // 宽度适配系数：页面槽位固定，宽度变化只更新此系数（整层等比缩放）
     private readonly Dictionary<int, int> _pageRotations = new();   // 页索引 → 旋转角（0/90/180/270，仅非 0 记录；旋转只作用于当前页）
     private bool _zoomActive;                        // 缩放操作进行中（缩放引发的 ScrollChanged 不取消清晰）
@@ -71,9 +86,17 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     private double[] _pageTopDips = Array.Empty<double>();   // 页面顶部 DIP 前缀和（未缩放，供二分找可见页）
     private double[] _thumbTopDips = Array.Empty<double>();  // 缩略图顶部 DIP 前缀和（供二分找可见缩略图）
     private double _thumbItemChrome = ThumbnailMargin;       // 每项图片外的布局高度（ExtentHeight 实测；ThumbnailMargin 作布局未就绪时的回退）
+    private long _lastReloadPagesMs;                         // 最近一次 ReloadPages 的集合构建耗时（打开耗时日志用）
+    private int _highlightedThumbIndex = -1;                 // 当前高亮的缩略图索引（增量更新用）
+    private double _maxPageExtent = 800;                     // 文档内最大页槽位宽（Base DIP），决定页面列宽
+    private int _materializedStart = -1;                     // 已挂载墨迹画布的页区间（含缓冲）
+    private int _materializedEnd = -1;
 
-    public ObservableCollection<PageModel> Pages { get; } = new();
-    public ObservableCollection<ThumbnailModel> Thumbnails { get; } = new();
+    public List<PageModel> Pages { get; private set; } = new();
+    public List<ThumbnailModel> Thumbnails { get; private set; } = new();
+
+    /// <summary>页面集合整体替换（打开/关闭文档）：宿主据此清理旧画布与笔画追踪。</summary>
+    public event Action? PagesReset;
 
     /// <summary>墨迹批注工具状态 + 全局撤销栈（GetPageStrokes 由构造器注入）。</summary>
     public InkToolViewModel InkTool { get; } = new();
@@ -189,8 +212,14 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     /// <summary>滚动到指定垂直偏移（布局坐标），由 MainWindow 注入实际滚动实现（宽度变化保持页内位置用）。</summary>
     public Action<double>? RequestScrollToOffset { get; set; }
 
-    /// <summary>恢复文档显示滚动位置（offset + 页码回退），由 MainWindow 注入（Loaded 时机调用，内部 UpdateLayout）。</summary>
-    public Action<double, int>? RequestRestoreScroll { get; set; }
+    /// <summary>恢复文档显示滚动位置（offset、比例、页码回退），由 MainWindow 注入（Loaded 时机调用，内部 UpdateLayout）。</summary>
+    public Action<double, double, int>? RequestRestoreScroll { get; set; }
+
+    /// <summary>恢复文档水平滚动位置（0..1 比例；负值 = 无记忆，由宿主居中），由 MainWindow 注入。</summary>
+    public Action<double>? RequestRestoreHorizontal { get; set; }
+
+    /// <summary>请求宿主立即用真实滚动容器尺寸同步可见页（打开文档后首屏兜底）。</summary>
+    public Action? RequestVisiblePagesSync { get; set; }
 
     /// <summary>浮动通知回调（消息 + 严重级别），由 MainWindow 注入 ShowFloatingTip。</summary>
     public Action<string, iNKORE.UI.WPF.Modern.Controls.InfoBarSeverity>? ShowTip { get; set; }
@@ -224,6 +253,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
             if (SetField(ref _zoomLevel, Math.Clamp(value, 0.05, 5.0)))
             {
                 OnPropertyChanged(nameof(DisplayScale));
+                OnPropertyChanged(nameof(PageColumnWidthBase));
                 ScheduleSharpen();
             }
         }
@@ -240,6 +270,11 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     /// 页面尺寸固定不重建，宽度变化只改 _widthFit → 无占位闪动。</summary>
     public double DisplayScale => _zoomLevel * _widthFit;
 
+    /// <summary>页面列宽（Base DIP，未缩放）：取"视口可用宽反算值"与"最大页槽位宽"的较大者。
+    /// 页槽按此宽度撑满，页面在槽内水平居中；整层 LayoutTransform 缩放后即为可视宽。</summary>
+    public double PageColumnWidthBase =>
+        Math.Max((_viewportWidth - ScrollBarAllowance) / Math.Max(0.01, DisplayScale), _maxPageExtent);
+
     /// <summary>高 DPI 缩放系数（由 MainWindow 注入），用于决定渲染分辨率。</summary>
     public double DpiScale
     {
@@ -254,6 +289,16 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     /// <summary>base 渲染宽度：不随缩放，上限 MaxBaseWidth（供回扫/缩小时快速显示并进 LRU）。</summary>
     private int GetBaseWidth(int pageWidth) =>
         Math.Min(MaxBaseWidth, (int)Math.Round(pageWidth * _dpiScale));
+
+    /// <summary>按目标像素宽把页面点尺寸换算为显示尺寸（取整规则与 PdfRenderService.GetPageSize 一致）。
+    /// 打开文档时同一页只向 PDFium 取一次点尺寸，页面槽位与缩略图槽位都由本方法派生。</summary>
+    private static PageSize ScaleToWidth(double pointWidth, double pointHeight, int targetWidth)
+    {
+        int renderWidth = Math.Max(1, targetWidth);
+        if (pointWidth <= 0 || pointHeight <= 0)
+            return new PageSize(renderWidth, renderWidth);
+        return new PageSize(renderWidth, Math.Max(1, (int)Math.Round(pointHeight / pointWidth * renderWidth)));
+    }
 
     /// <summary>滚动停止去抖：只补缺失页的模糊 base，不渲染清晰位图（滚动不清晰）。</summary>
     private void ScheduleScrollRender(bool pageExited)
@@ -329,7 +374,27 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         _releaseTimer.Tick -= OnReleaseTick;
         // 低优先级：等 UI 空闲再执行释放，避免阻塞渲染帧（WPF Dispatcher 支持该优先级）。
         Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle,
-            new Action(ReleaseVisibleHiToBase));
+            new Action(() =>
+            {
+                ReleaseVisibleHiToBase();
+                CompactLohSoon();   // 释放后压缩大对象堆，把空段归还系统
+            }));
+    }
+
+    /// <summary>空闲期一次性 LOH 压缩：普通 Gen2 回收只释放对象，大对象堆分段不压缩、
+    /// 已提交内存不归还；CompactOnce 才把对象挪紧并归还空段（借鉴 KillerPDF：关掉缓存后
+    /// 任务管理器仍显示峰值内存即此因）。仅空闲/关文档时机调用，10 秒节流。</summary>
+    private void CompactLohSoon()
+    {
+        long now = Environment.TickCount64;
+        if (now - _lastLohCompactTickMs < 10_000)
+            return;
+        _lastLohCompactTickMs = now;
+        Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
+        {
+            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+            GC.Collect();
+        }));
     }
 
     /// <summary>空闲释放：把可见页±缓冲中的 hi 位图换回 base（LRU 命中复用）。
@@ -362,7 +427,10 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         get => _viewportWidth;
         set
         {
-            if (!SetField(ref _viewportWidth, value) || !HasPdf)
+            if (!SetField(ref _viewportWidth, value))
+                return;
+            OnPropertyChanged(nameof(PageColumnWidthBase));   // 内容宽下限=视口宽：视口变化即需重算
+            if (!HasPdf)
                 return;
             double newFit = Math.Clamp((_viewportWidth - 40.0) / Math.Max(1, _targetPageWidth), 0.15, 5.0);
             if (Math.Abs(newFit - _widthFit) < 1e-6)
@@ -370,8 +438,10 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
             double ratio = newFit / _widthFit;
             _widthFit = newFit;
             OnPropertyChanged(nameof(DisplayScale));
+            OnPropertyChanged(nameof(PageColumnWidthBase));
             // 整层等比缩放：同一内容保持在视口内（比例精确，无重建、无占位闪动）。
-            if (_lastViewportHeight > 0 && Pages.Count > 0)
+            // 打开文档恢复位置期间不补偿：此时 _lastVerticalOffset 尚未恢复到目标位置，补偿会把视图拉回顶部
+            if (!_restoringView && _lastViewportHeight > 0 && Pages.Count > 0)
                 RequestScrollToOffset?.Invoke(_lastVerticalOffset * ratio);
         }
     }
@@ -451,13 +521,19 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
             // + 墨迹库（算文件内容哈希、列目录判别、读三份数据——均非 UI 线程）
             var sizes = await Task.Run(() =>
             {
+                var sizeSw = Stopwatch.StartNew();
                 _pdf.OpenDocument(path, password);
+                long openMs = sizeSw.ElapsedMilliseconds;   // 仅打开文档（解析交叉引用/页树）
                 var pageSizes = new PageSize[_pdf.PageCount];
                 var thumbSizes = new PageSize[_pdf.PageCount];
+                // 同一页只向 PDFium 取一次点尺寸（一次 FPDF_LoadPage），页面槽位与缩略图槽位由同一结果派生
                 for (int i = 0; i < _pdf.PageCount; i++)
-                    pageSizes[i] = _pdf.GetPageSize(i, targetWidth);
-                for (int i = 0; i < _pdf.PageCount; i++)
-                    thumbSizes[i] = _pdf.GetPageSize(i, ThumbnailWidth);
+                {
+                    var (pw, ph) = _pdf.GetPageSizePoints(i);
+                    pageSizes[i] = ScaleToWidth(pw, ph, targetWidth);
+                    thumbSizes[i] = ScaleToWidth(pw, ph, ThumbnailWidth);
+                }
+                long sizeMs = sizeSw.ElapsedMilliseconds - openMs;   // 仅逐页尺寸测量
 
                 var store = autoSave ? InkStoreService.TryOpen(path) : null;
                 if (!autoSave)
@@ -465,6 +541,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
                 var pageInks = store?.LoadPages() ?? new Dictionary<int, byte[]>();
                 var boardSlots = store?.LoadBoardSlots() ?? new Dictionary<int, byte[]>();
                 var viewState = store?.LoadViewState() ?? new Dictionary<string, string>();
+                long inkMs = sizeSw.ElapsedMilliseconds - openMs - sizeMs;
                 // 逐页旋转态：键 pdf_rot_{0-based页索引}（忽略旧版全局 pdf_rotation）
                 var pageRotations = new Dictionary<int, int>();
                 foreach (var (key, value) in viewState)
@@ -479,7 +556,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
                     if (index >= 0 && rotation != 0)
                         pageRotations[index] = rotation;
                 }
-                return (pageSizes, thumbSizes, pageRotations, store, pageInks, boardSlots, viewState);
+                return (pageSizes, thumbSizes, pageRotations, store, pageInks, boardSlots, viewState, openMs, sizeMs, inkMs);
             });
 
             // 回 UI 线程：建集合 + 后续懒加载（InkStore 只在 UI 线程赋值/读取）
@@ -487,6 +564,16 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
             ApplyDocumentMenuState(sizes.viewState);   // 菜单记忆回读（先复位代码默认，再按键覆盖）
             PdfName = Path.GetFileNameWithoutExtension(path);
             HasPdf = true;
+
+            // 恢复缩放必须先于 ReloadPages：页槽按最终 DisplayScale 构建，避免打开后再整体重排
+            if (sizes.viewState.TryGetValue("pdf_zoom", out var zoomStr)
+                && double.TryParse(zoomStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var zoom))
+                ZoomLevel = zoom;
+            else
+                ZoomLevel = 1.0;   // 无墨迹文档：缩放复位，防止继承上一个 PDF 的缩放
+
+            _restoringView = true;   // 恢复期间屏蔽视口宽度变化引起的滚动补偿
+
             _pageRotations.Clear();   // 旋转态必须先于 ReloadPages 生效（槽位尺寸按各页旋转角交换）
             foreach (var (index, rotation) in sizes.pageRotations)
                 _pageRotations[index] = rotation;
@@ -497,17 +584,12 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
                 await DocumentOpened(new InkRestoreData(sizes.store, sizes.pageInks,
                     sizes.boardSlots, sizes.viewState));
 
-            // 恢复显示位置：先缩放（clamp 自带），再 Loaded 时机恢复滚动（布局未跑时 offset 无效，交回退页码）
-            if (sizes.viewState.TryGetValue("pdf_zoom", out var zoomStr)
-                && double.TryParse(zoomStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var zoom))
-                ZoomLevel = zoom;
-            else
-                ZoomLevel = 1.0;   // 无墨迹文档：缩放复位，防止继承上一个 PDF 的缩放
             _ = Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
             {
                 if (!HasPdf)
                 {
                     IsOpeningPdf = false;   // 文档已不在：直接撤加载页，不留死等
+                    _restoringView = false;
                     return;
                 }
                 double offset = 0;
@@ -516,25 +598,49 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
                 int page = 1;
                 if (sizes.viewState.TryGetValue("pdf_page", out var pageStr))
                     int.TryParse(pageStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out page);
-                if (hasOffset && RequestRestoreScroll != null)
-                    RequestRestoreScroll(offset, Math.Max(1, page));
+
+                // 垂直位置：优先比例（跨缩放/视口稳定），其次绝对偏移，最后页码
+                double vRatio = -1;
+                if (sizes.viewState.TryGetValue("pdf_offset_ratio", out var vStr)
+                    && double.TryParse(vStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var vr)
+                    && vr >= 0)
+                    vRatio = vr;
+                if ((hasOffset || vRatio >= 0) && RequestRestoreScroll != null)
+                    RequestRestoreScroll(offset, vRatio, Math.Max(1, page));
                 else
                     GoToPage(Math.Max(1, page));   // 无墨迹文档：滚动复位到页顶，防止继承上一个 PDF 的滚动位置
+
+                // 水平位置：db 有记忆（0..1 比例）就恢复，没有则居中（负值）
+                double hRatio = -1;
+                if (sizes.viewState.TryGetValue("pdf_hoffset", out var hStr)
+                    && double.TryParse(hStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var h)
+                    && h >= 0)
+                    hRatio = h;
+                RequestRestoreHorizontal?.Invoke(hRatio);
+
+                // 本帧布局与 SizeChanged 全部走完后，再恢复正常宽度补偿
+                Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background,
+                    new Action(() => _restoringView = false));
+
+                // 首屏兜底：用真实滚动容器尺寸同步一次可见页，确保位图请求一定被发起
+                RequestVisiblePagesSync?.Invoke();
 
                 // 位置恢复后再等首屏可见页位图就位，才撤加载页（成功路径唯一出口；含超时兜底）
                 stopwatch.Stop();
                 ConsoleLog.Write("PDF打开",
-                    $"打开成功: 页数={_pdf.PageCount}, 恢复墨迹页={sizes.pageInks.Count}, 画板槽={sizes.boardSlots.Count}, 耗时={stopwatch.ElapsedMilliseconds}ms");
+                    $"打开成功: 页数={_pdf.PageCount}, 打开文档={sizes.openMs}ms, 尺寸={sizes.sizeMs}ms, 墨迹库={sizes.inkMs}ms, 集合={_lastReloadPagesMs}ms, 恢复墨迹页={sizes.pageInks.Count}, 画板槽={sizes.boardSlots.Count}, 耗时={stopwatch.ElapsedMilliseconds}ms");
                 BeginWaitFirstScreenReady();
             }));
         }
         catch (PdfRenderService.PasswordRequiredException)
         {
+            _restoringView = false;
             ConsoleLog.Write("PDF打开", "需要密码");
             await ShowPasswordDialog(path);   // 加载页保持打开，密码框盖在其上；撤页在弹窗放弃出口做
         }
         catch (Exception ex)
         {
+            _restoringView = false;
             IsOpeningPdf = false;   // 失败路径撤加载页（成功路径由首屏就绪轮询撤），再弹错误框
             ConsoleLog.Write("PDF打开", $"打开失败: {ex}");
             App.Log("OpenPdfFile", ex);
@@ -725,6 +831,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
             _openReadyElapsedMs += OpenReadyPollMs;
             if (_openReadyElapsedMs >= OpenReadyTimeoutMs)
             {
+                ConsoleLog.Write("PDF打开", $"首屏超时: 视口高={_lastViewportHeight:F0}, 页数={Pages.Count}");
                 App.LogText($"OpenReady: 首屏位图未在 {OpenReadyTimeoutMs}ms 内就绪，强制撤加载页");
                 done = true;
             }
@@ -741,6 +848,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
                 _openReadyTimer!.Stop();
                 _openReadyTimer.Tick -= OnOpenReadyTick;
                 IsOpeningPdf = false;
+                CompactLohSoon();   // 首屏渲染产生的大对象堆垃圾：就绪后压缩归还
             }
         }
     }
@@ -754,14 +862,26 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         _scrollDebounceTimer?.Stop();
         _sharpenTimer?.Stop();
         _releaseTimer?.Stop();
+        CancelAllPendingRenders();   // 在途页面渲染全部作废
         _pdf.CloseDocument();
-        Pages.Clear();
-        Thumbnails.Clear();
+        PagesReset?.Invoke();   // 旧页模型全部作废：宿主清理画布与笔画追踪
+        Pages = new();
+        Thumbnails = new();
+        OnPropertyChanged(nameof(Pages));
+        OnPropertyChanged(nameof(Thumbnails));
         _pageTopDips = Array.Empty<double>();
         _thumbTopDips = Array.Empty<double>();
         _loadedStartIndex = _loadedEndIndex = -1;
         _thumbLoadedStartIndex = _thumbLoadedEndIndex = -1;
+        _highlightedThumbIndex = -1;                  // 缩略图模型已清空：高亮索引复位
+        _materializedStart = _materializedEnd = -1;   // 页模型已清空：挂载区间复位
         _firstVisiblePageIndex = 0;
+        // 滚动/缩放交互状态复位：避免下一份文档沿用上一份的视口尺寸与缩放交互态
+        _lastViewportHeight = 0;
+        _lastVerticalOffset = 0;
+        _lastRangeFirst = _lastRangeLast = -1;
+        _zoomActive = false;
+        IsZooming = false;
         _pageRotations.Clear();   // 回到主页：逐页旋转态复位（下一文档按自身侧车 db 恢复）
         PageNumberText = "1";
         IsThumbnailPanelVisible = false;
@@ -771,45 +891,41 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         HasPdf = false;   // 触发工具栏/空态按钮 Visibility 切换
         OnPropertyChanged(nameof(TotalPages));
         OnPropertyChanged(nameof(CurrentPage));
+        CompactLohSoon();   // 关文档后压缩大对象堆（缓存/位图引用已断，正是归还空段的时机）
     }
 
     /// <summary>按当前视口宽度重建全部页面模型，并加载可见页（尺寸由后台线程预算好传入）。
-    /// 容器拆除/填充按 8ms 时间片分批、批间让帧：非虚拟化 ItemsControl 的全量容器实现若集中在一个
-    /// 布局帧会冻结 ProgressRing 动画——分批 = 每帧只实现一批，总成本不变只摊薄。</summary>
-    private async Task ReloadPages(PageSize[] pageSizes, PageSize[] thumbSizes)
+    /// 页槽全量但极轻（Border/Grid/Image），墨迹画布只按可见范围挂载；
+    /// 集合一次性填充即可——分批让帧会让 StackPanel 重复全量布局（O(N²) 卡顿源）。</summary>
+    private Task ReloadPages(PageSize[] pageSizes, PageSize[] thumbSizes)
     {
         _isRebuildingPages = true;   // 中间态抑制 UpdateVisiblePages（Pages 与 _pageTopDips 暂不一致）
         // 文档切换：停掉旧文档的防抖/清晰/释放计时器（原来只有 GoHome 停，直开新文档会残留）
+        // 并复位缩放交互态：打开时恢复 ZoomLevel 会启动 sharpen，若只停计时器不复位 _zoomActive，
+        // ScheduleScrollRender 会永久早退 → 位图从不加载（表现为整页白屏，手动缩放一下才恢复）
+        _zoomActive = false;
+        IsZooming = false;
         _scrollDebounceTimer?.Stop();
         _sharpenTimer?.Stop();
         _releaseTimer?.Stop();
 
         _pdf.ClearCache();
+        CancelAllPendingRenders();   // 旧文档的在途渲染全部作废，避免旧位图写入新页模型
         _loadedStartIndex = -1;
         _loadedEndIndex = -1;
         _thumbLoadedStartIndex = -1;
         _thumbLoadedEndIndex = -1;
         _firstVisiblePageIndex = 0;
+        _highlightedThumbIndex = -1;                  // 旧缩略图模型全部销毁：高亮索引复位
+        _materializedStart = _materializedEnd = -1;   // 旧 PageModel 全部销毁：挂载区间复位
         _targetPageWidth = Math.Max(400, _viewportWidth - 40);
-        _widthFit = 1.0;   // 新文档：宽度适配复位（页面尺寸固定，宽度变化只改此系数）
+        // 宽度适配按当前视口宽一次性算好：打开后 SizeChanged 因值未变而提前返回，不会触发滚动补偿
+        _widthFit = Math.Clamp((_viewportWidth - 40.0) / Math.Max(1, _targetPageWidth), 0.15, 5.0);
 
         var sw = Stopwatch.StartNew();
-        long lastSlice = 0;
 
-        // ① 分批拆除旧页容器：Clear 是一个 Reset 同步拆光（重开文档卡顿源）；逐个 Remove + 片间让帧。
-        //    首次打开集合为空，循环体不执行。
-        while (Pages.Count > 0)
-        {
-            Pages.RemoveAt(Pages.Count - 1);
-            if (sw.ElapsedMilliseconds - lastSlice >= RebuildPageSliceMs)
-            {
-                await Dispatcher.Yield(DispatcherPriority.Background);   // 让 Render 帧跑（布局+圆圈动画）
-                lastSlice = sw.ElapsedMilliseconds;
-            }
-        }
-
-        Thumbnails.Clear();   // 虚拟化面板，成本低，同步即可
-
+        // 一次性构造并整体替换：List 替换只触发一次 UI 通知（1 万页时省掉上万次 CollectionChanged）
+        var newThumbs = new List<ThumbnailModel>(thumbSizes.Length);
         for (int i = 0; i < thumbSizes.Length; i++)
         {
             // NaturalWidth/Height 为未旋转尺寸；显示尺寸按该页旋转角推算（旋转后缩略图宽度仍为 ThumbnailWidth）
@@ -822,13 +938,11 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
                 Rotation = rotation,
             };
             ApplyThumbnailRotation(thumb, rotation);
-            Thumbnails.Add(thumb);
+            newThumbs.Add(thumb);
         }
 
-        // 缩略图顶部 DIP 前缀和先建：页面分批期间缩略图侧状态保持完整一致（ThumbnailScrollViewer_ScrollChanged 安全）。
-        RebuildThumbTopDips();
-
-        // ② 分批填充新页容器：容器在布局帧内实现——批间让帧 = 每帧只实现一批（主修复）。
+        var newPages = new List<PageModel>(pageSizes.Length);
+        double maxExtent = 0;
         for (int i = 0; i < pageSizes.Length; i++)
         {
             // 内容尺寸固定为未旋转尺寸（墨迹坐标系）；显示槽位 = 该页旋转后的包围盒（位图由 PDFium 原生旋转）
@@ -841,18 +955,27 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
                 Rotation = rotation,
             };
             ApplyPageRotation(page, rotation);
-            Pages.Add(page);
-            if (sw.ElapsedMilliseconds - lastSlice >= RebuildPageSliceMs)
-            {
-                await Dispatcher.Yield(DispatcherPriority.Background);
-                lastSlice = sw.ElapsedMilliseconds;
-            }
+            maxExtent = Math.Max(maxExtent, page.Width);   // 旋转后的槽位宽（列宽只需覆盖页面宽度）
+            newPages.Add(page);
         }
+
+        PagesReset?.Invoke();   // 旧页模型全部作废：宿主清理画布与笔画追踪
+        Thumbnails = newThumbs;
+        Pages = newPages;
+        OnPropertyChanged(nameof(Thumbnails));
+        OnPropertyChanged(nameof(Pages));
+
+        _maxPageExtent = maxExtent > 0 ? maxExtent : 800;
+        OnPropertyChanged(nameof(PageColumnWidthBase));   // 列宽 = 最大页槽位宽 × 缩放（旋转 90° 也不超宽）
+
+        // 缩略图顶部 DIP 前缀和：填充后一次性重建
+        RebuildThumbTopDips();
 
         // 构建页面顶部 DIP 前缀和：可见页查找由 O(N) 遍历降为 O(logN) 二分（页面高度固定，缩放仅整体乘 ZoomLevel）。
         // 必须在 _isRebuildingPages=false 之前完成，保证守卫解除时状态已一致。
         RebuildPageTopDips();
 
+        _lastReloadPagesMs = sw.ElapsedMilliseconds;
         _isRebuildingPages = false;
 
         OnPropertyChanged(nameof(TotalPages));
@@ -865,7 +988,19 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         if (_lastViewportHeight > 0)
             UpdateVisiblePages(_lastVerticalOffset, _lastViewportHeight);
         else
-            LoadPageImages(0, Math.Min(PageBufferSize, Pages.Count - 1), needHiInViewport: false);   // 初始只补 base
+        {
+            // 视口尺寸未知：请宿主用真实滚动容器同步一次（否则首屏位图可能永远不请求）
+            RequestVisiblePagesSync?.Invoke();
+            if (_lastViewportHeight > 0)
+                UpdateVisiblePages(_lastVerticalOffset, _lastViewportHeight);
+            else
+            {
+                UpdateMaterializedRange(0, Math.Min(PageBufferSize, Pages.Count - 1));   // 首屏附近先挂墨迹画布
+                LoadPageImages(0, Math.Min(PageBufferSize, Pages.Count - 1), needHiInViewport: false);   // 初始只补 base
+            }
+        }
+
+        return Task.CompletedTask;
     }
 
     /// <summary>滚动/内容位置变化时：实时更新当前页指示与缩略图高亮，位图渲染走去抖（滚动期间不刷新位图）。</summary>
@@ -884,6 +1019,8 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         _lastRangeFirst = first;
         _lastRangeLast = last;
 
+        UpdateMaterializedRange(first, last);   // 只保留可见范围（±缓冲）的墨迹画布
+
         // 当前页 = 视口中占比最大的页（交界处哪页占得多算哪页）。
         int dominant = GetDominantPageIndex(first, last, verticalOffset, viewportHeight);
         if (dominant >= 0 && dominant != _firstVisiblePageIndex)
@@ -898,6 +1035,37 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         ScheduleScrollRender(pageExited);
     }
 
+    /// <summary>墨迹画布按可见范围挂载：区间外的 PageModel 置 IsMaterialized=false，页槽随之销毁 InkCanvas，
+    /// 滚回时重新生成。只对区间差集逐页切换，区间未变时 O(1) 早退——滚动高频调用不产生额外开销。
+    /// Strokes 保存在 PageModel，卸载不丢墨迹。</summary>
+    private void UpdateMaterializedRange(int firstVisible, int lastVisible)
+    {
+        int n = Pages.Count;
+        if (n == 0)
+        {
+            _materializedStart = _materializedEnd = -1;
+            return;
+        }
+        int start = Math.Max(0, firstVisible - MaterializeBufferPages);
+        int end = Math.Min(n - 1, lastVisible + MaterializeBufferPages);
+        if (start == _materializedStart && end == _materializedEnd)
+            return;
+
+        // 先卸掉离开区间的页（可能两段），再挂上新进入区间的页（同样最多两段）
+        if (_materializedStart >= 0)
+        {
+            for (int i = _materializedStart; i <= _materializedEnd; i++)
+                if (i < start || i > end)
+                    Pages[i].IsMaterialized = false;
+        }
+        for (int i = start; i <= end; i++)
+            if (i < _materializedStart || i > _materializedEnd)
+                Pages[i].IsMaterialized = true;
+
+        _materializedStart = start;
+        _materializedEnd = end;
+    }
+
     /// <summary>把页码输入框文本同步为当前页。</summary>
     private void SyncPageNumberText()
     {
@@ -905,11 +1073,19 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
             PageNumberText = CurrentPage.ToString();
     }
 
-    /// <summary>更新缩略图当前页高亮。</summary>
+    /// <summary>更新缩略图当前页高亮（增量：只改旧/新两项，避免每次滚动对全部页发属性通知）。</summary>
     private void UpdateThumbnailHighlight()
     {
-        for (int i = 0; i < Thumbnails.Count; i++)
-            Thumbnails[i].IsCurrent = i == _firstVisiblePageIndex;
+        int target = _firstVisiblePageIndex >= 0 && _firstVisiblePageIndex < Thumbnails.Count
+            ? _firstVisiblePageIndex
+            : -1;
+        if (target == _highlightedThumbIndex)
+            return;
+        if (_highlightedThumbIndex >= 0 && _highlightedThumbIndex < Thumbnails.Count)
+            Thumbnails[_highlightedThumbIndex].IsCurrent = false;
+        if (target >= 0)
+            Thumbnails[target].IsCurrent = true;
+        _highlightedThumbIndex = target;
     }
 
     /// <summary>页面顶部/底部的缩放后坐标（前缀和 O(1)，整层等比）。</summary>
@@ -1281,7 +1457,10 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
             for (int i = _loadedStartIndex; i <= _loadedEndIndex; i++)
             {
                 if (i < startIndex || i > endIndex)
+                {
                     Pages[i].Image = null;
+                    CancelPendingRender(i);   // 该页已离开缓冲区：在途渲染开跑前作废，不再白渲染大图
+                }
             }
         }
 
@@ -1311,27 +1490,110 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>发起一页的后台渲染（UI 线程调用）。单飞去重：同页在途渲染未完成时新请求由
-    /// 完成回调的期望宽度重算兜底（尺寸过期自动按当前期望重发），此处直接跳过。</summary>
+    /// 完成回调的期望宽度重算兜底（尺寸过期自动按当前期望重发），此处直接跳过。
+    /// 请求带取消源：滚出缓冲区/换文档时取消，PDFium 开跑前即可作废，避免白渲染 ≈20MB。</summary>
     private void StartPageRender(int index, bool wantHi)
     {
-        if (index < 0 || index >= Pages.Count || _pendingPageRenders.Contains(index))
+        if (index < 0 || index >= Pages.Count)
             return;
+        var existing = _pendingPageRenders.GetValueOrDefault(index);
+        if (existing != null && !existing.Cts.IsCancellationRequested)
+            return;   // 在途且未作废：单飞跳过
+        if (existing != null)
+            DropPendingRender(index);   // 已作废旧请求：清掉账目后重发
+
         var page = Pages[index];
-        _pendingPageRenders.Add(index);
         int rotation = page.Rotation;   // 位图按该页旋转角原生渲染；完成回调校验方向未变
+        int renderW = wantHi ? GetRenderWidth(page.Width) : GetBaseWidth(page.Width);
+        long estimatedBytes = EstimateRenderBytes(page, renderW);
+
+        // 在途字节上限：超限时取消离可见区最远的一页，腾出名额（与 KillerPDF 的队列字节预算同思路）。
+        if (_inflightRenderBytes + estimatedBytes > MaxInflightRenderBytes)
+        {
+            int farthest = FindFarthestInflightRender(index);
+            if (farthest >= 0)
+                CancelPendingRender(farthest);
+            else
+                return;   // 无可取消项：放弃本次，下一轮防抖重试
+        }
+
+        var cts = new CancellationTokenSource();
+        _pendingPageRenders[index] = new PendingPageRender(cts, estimatedBytes);
+        _inflightRenderBytes += estimatedBytes;
         Task<ImageSource> task = wantHi
-            ? _pdf.RenderPageAsync(index, GetRenderWidth(page.Width), page.Width, page.Height, rotation)
-            : _pdf.RenderPageBaseAsync(index, GetBaseWidth(page.Width), page.Width, page.Height, rotation);
-        task.ContinueWith(t => Application.Current?.Dispatcher.BeginInvoke(
-            DispatcherPriority.Background,
-            new Action(() => CompletePageRender(index, page, rotation, t))));
+            ? _pdf.RenderPageAsync(index, renderW, page.Width, page.Height, rotation, cts.Token)
+            : _pdf.RenderPageBaseAsync(index, renderW, page.Width, page.Height, rotation, cts.Token);
+        task.ContinueWith(t =>
+        {
+            // 取消源不在这里释放：它可能仍在字典里被后续请求读取 IsCancellationRequested / Cancel，
+            // 提前 Dispose 会抛 ObjectDisposedException；取消源本身无原生资源，交由 GC 回收。
+            Application.Current?.Dispatcher.BeginInvoke(DispatcherPriority.Background,
+                new Action(() => CompletePageRender(index, page, rotation, cts, t)));
+        });
+    }
+
+    /// <summary>估算一页渲染的像素字节（未旋转内容宽高 × 渲染像素宽 ÷ 槽位宽，BGRA 4 字节）。</summary>
+    private static long EstimateRenderBytes(PageModel page, int renderW)
+    {
+        bool swap = page.Rotation is 90 or 270;
+        int contentDipH = swap ? page.Width : page.Height;
+        double pxPerDip = (double)renderW / Math.Max(1, page.Width);
+        int pxH = Math.Max(1, (int)Math.Round(contentDipH * pxPerDip));
+        return (long)renderW * pxH * 4;
+    }
+
+    /// <summary>取消一页在途渲染（滚出缓冲区时调用）：只发取消信号，账目与释放留给完成回调。</summary>
+    private void CancelPendingRender(int index)
+    {
+        _pendingPageRenders.GetValueOrDefault(index)?.Cts.Cancel();
+    }
+
+    /// <summary>移除一页在途记录并冲销字节账目（取消源不在此释放：可能仍被旧任务/后续请求引用）。</summary>
+    private void DropPendingRender(int index)
+    {
+        if (!_pendingPageRenders.Remove(index, out var entry))
+            return;
+        _inflightRenderBytes -= entry.EstimatedBytes;
+    }
+
+    /// <summary>取消全部在途渲染（换文档/回主页）：清账目、清字典（取消源交由旧任务自己的完成回调与 GC 处理）。</summary>
+    private void CancelAllPendingRenders()
+    {
+        foreach (var entry in _pendingPageRenders.Values)
+            entry.Cts.Cancel();
+        _pendingPageRenders.Clear();
+        _inflightRenderBytes = 0;
+    }
+
+    /// <summary>找离可见区最远且在途的页（排除 excludeIndex）：用于字节超限时腾名额。</summary>
+    private int FindFarthestInflightRender(int excludeIndex)
+    {
+        int first = _lastRequestFirst < 0 ? 0 : _lastRequestFirst;
+        int last = _lastRequestLast < 0 ? first : _lastRequestLast;
+        int farthest = -1;
+        int bestDistance = -1;
+        foreach (var index in _pendingPageRenders.Keys)
+        {
+            if (index == excludeIndex)
+                continue;
+            int distance = index < first ? first - index : index > last ? index - last : 0;
+            if (distance > bestDistance)
+            {
+                bestDistance = distance;
+                farthest = index;
+            }
+        }
+        return farthest;
     }
 
     /// <summary>后台渲染完成回填（UI 线程，Background 优先级——不与输入/湿墨抢帧）：
     /// 校验页模型仍有效、方向未变后按当前期望宽度决定：赋值 / 丢弃（尺寸过期且已滚出缓冲）/ 按当前期望重发。</summary>
-    private void CompletePageRender(int index, PageModel page, int rotation, Task<ImageSource> task)
+    private void CompletePageRender(int index, PageModel page, int rotation, CancellationTokenSource cts,
+        Task<ImageSource> task)
     {
-        _pendingPageRenders.Remove(index);
+        // 只冲销这笔自己的账目：同页可能已被新请求替换（尺寸过期重发），不能误删新记录
+        if (_pendingPageRenders.TryGetValue(index, out var entry) && ReferenceEquals(entry.Cts, cts))
+            DropPendingRender(index);
         if (index >= Pages.Count || !ReferenceEquals(Pages[index], page))
             return;   // 文档已重建，丢弃
         if (page.Rotation != rotation)
@@ -1339,6 +1601,8 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
             StartPageRender(index, _lastRequestNeedHi && index >= _lastRequestFirst && index <= _lastRequestLast);   // 旋转角已变：按新方向重发
             return;
         }
+        if (task.IsCanceled)
+            return;   // 已主动作废：静默丢弃（不是错误）
         if (!task.IsCompletedSuccessfully)
         {
             App.Log($"RenderPage p{index}", task.Exception?.GetBaseException());

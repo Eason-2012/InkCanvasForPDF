@@ -33,7 +33,7 @@ namespace InkCanvasForPDF.Board
             get
             {
                 var s = Vm?.Settings;
-                if (s == null || !s.IsPalmEraseEnabled) return s?.FingerModeBoundsWidth ?? 30;
+                if (s == null || !s.IsPalmEraseEnabled) return s?.FingerModeBoundsWidth ?? 175;
                 return s.IsNibModeEnabled ? s.NibModeBoundsWidth : s.FingerModeBoundsWidth;
             }
         }
@@ -91,6 +91,13 @@ namespace InkCanvasForPDF.Board
                     inkCanvas.Children.Remove(staleCanvas);
                 StrokeVisualList.Remove(deviceId);
             };
+            // 在绘点采集：双指停墨保留时用它重建被 WPF 丢弃的湿墨
+            _inkTrace = new InkTraceCollector(inkCanvas);
+            // 触点位置跟踪：双指缩放倍率自算（WPF 单 manipulator 时 ManipulationDelta.Scale 恒 1）
+            inkCanvas.AddHandler(UIElement.TouchMoveEvent,
+                new EventHandler<TouchEventArgs>(Board_TouchMoveTrack), true);
+            inkCanvas.AddHandler(UIElement.TouchUpEvent,
+                new EventHandler<TouchEventArgs>(Board_TouchUpTrack), true);
             RefreshTimePressureArmed();
         }
 
@@ -105,7 +112,9 @@ namespace InkCanvasForPDF.Board
             c.HighlighterPressureEnabled = _highlighterPressureEnabled;
             // 书写模式 = 画笔工具 + 非形状手绘；橡皮/选择/形状一律视为非书写，时间笔锋整体不介入
             bool penMode = !forceEraser && drawingShapeMode == 0;
-            bool inkMode = penMode && (isInMultiTouchMode || inkCanvas.EditingMode == InkCanvasEditingMode.Ink);
+            bool inkMode = penMode && (isInMultiTouchMode
+                                       || inkCanvas.EditingMode == InkCanvasEditingMode.Ink
+                                       || _gestureInkFrozen);   // 双指手势停墨保留中：武装保持，湿墨不许被 AbortStroke 清掉
             bool armed = Settings.Canvas.InkStyle == 3
                          && inkColor <= 100
                          && inkMode;

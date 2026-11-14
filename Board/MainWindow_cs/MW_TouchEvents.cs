@@ -277,6 +277,7 @@ namespace InkCanvasForPDF.Board
                     ? new RectangleStylusShape(EraserDiameter, InkCircleCursor.EraserBoardHeight(EraserDiameter))
                     : new EllipseStylusShape(5, 5);
                 if (forceEraser) return;
+                if (dec.Count >= 2) return;   // 双指手势：Preview 已切 None，不得恢复 Ink（否则第二指开始画墨）
                 inkCanvas.EditingMode = InkCanvasEditingMode.Ink;
             }
         }
@@ -294,6 +295,10 @@ namespace InkCanvasForPDF.Board
         private const long StrokeKeepMinAgeMs = 100;   // 同 PDF 侧规则：最早点 ≥100ms 才保留
         private long _boardFirstTouchDownMs;           // 第一指落笔时刻（Environment.TickCount64，0=无）
         private bool _gestureDiscardPending;           // 本手势要丢弃被中断的那一截（等收笔时删）
+        private bool _gestureInkFrozen;                // 双指手势停墨保留中：时间笔锋武装必须保持（否则 AbortStroke 清掉湿墨）
+        private InkTraceCollector? _inkTrace;          // 在绘点采集（停墨保留重建用）
+        private readonly Dictionary<int, Point> _boardTouchPoints = new();   // 活动触点位置（自算缩放倍率用）
+        private double _boardPinchDist;      // 上一帧两指距离（WPF 单 manipulator 时 md.Scale 恒 1）
 
         /// <summary>双指手势成立时回滚橡皮批处理（CodeInput 门，不入撤销历史）：橡皮 + 双指缩放不留擦除痕迹。</summary>
         private void RevertEraseBatchForGesture()
@@ -344,8 +349,10 @@ namespace InkCanvasForPDF.Board
         private void inkCanvas_PreviewTouchDown(object sender, TouchEventArgs e)
         {
             dec.Add(e.TouchDevice.Id);
+            _boardTouchPoints[e.TouchDevice.Id] = e.GetTouchPoint(inkCanvas).Position;   // 自算缩放倍率的触点跟踪
             if (dec.Count == 1)
                 _boardFirstTouchDownMs = Environment.TickCount64;   // 第一指落笔时刻 = 在绘笔画最早点时刻
+            _boardPinchDist = 0;   // 换指：下一帧重建两指距离基准
             //设备1个的时候，记录中心点
             if (dec.Count == 1)
             {
@@ -363,12 +370,35 @@ namespace InkCanvasForPDF.Board
                     _gestureDiscardPending = _boardFirstTouchDownMs != 0
                         && Environment.TickCount64 - _boardFirstTouchDownMs < StrokeKeepMinAgeMs;
                     if (_gestureDiscardPending)
+                    {
                         ConsoleLog.Write("画板双指手势", $"中断笔画过短丢弃: 存在={Environment.TickCount64 - _boardFirstTouchDownMs}ms");
+                        _gestureInkFrozen = false;
+                        inkCanvas.Controller.AbortStrokeKeepPrimary();   // 太短：丢湿墨，主设备身份保留给仍在按的第一指
+                    }
+                    else
+                    {
+                        // 保留：停收点但保样本与湿墨；_gestureInkFrozen 必须在切 None 之前置位（武装刷新靠它保持）
+                        _gestureInkFrozen = true;
+                        inkCanvas.Controller.FreezeCollectAll();
+                    }
                 }
                 if (inkCanvas.EditingMode != InkCanvasEditingMode.None && inkCanvas.EditingMode != InkCanvasEditingMode.Select)
                 {
                     lastInkCanvasEditingMode = inkCanvas.EditingMode;
                     inkCanvas.EditingMode = InkCanvasEditingMode.None;
+                }
+                // 保留：切 None 后湿墨已被 WPF 丢弃（原生命中管线）+ 抬笔不会提交，用采集点重建这一笔
+                if (_gestureInkFrozen && inkCanvas.EditingMode == InkCanvasEditingMode.None
+                    && _inkTrace is { } trace && trace.TryTake(out var kept))
+                {
+                    var stroke = new Stroke(new StylusPointCollection(kept))
+                    {
+                        DrawingAttributes = inkCanvas.DefaultDrawingAttributes.Clone()
+                    };
+                    inkCanvas.Strokes.Add(stroke);
+                    inkCanvas_StrokeCollected(inkCanvas, new InkCanvasStrokeCollectedEventArgs(stroke));
+                    inkCanvas.Controller.AbortStrokeKeepPrimary();   // 干墨已重建：清叠加层湿墨，主设备身份保留给仍在按的第一指
+                    ConsoleLog.Write("画板双指手势", $"停墨保留重建: 点数={kept.Count}");
                 }
                 if (dec.Count >= 2 && forceEraser)
                 {
@@ -389,7 +419,13 @@ namespace InkCanvasForPDF.Board
                 }
             }
             dec.Remove(e.TouchDevice.Id);
+            _boardTouchPoints.Remove(e.TouchDevice.Id);
             inkCanvas.Opacity = 1;
+            if (dec.Count == 0)
+            {
+                _gestureInkFrozen = false;   // 手势结束：武装交回正常门控（下方恢复 EditingMode 会重新武装）
+                _boardPinchDist = 0;
+            }
             if (dec.Count == 0 && _eraseGestureBatchGuard)
             {
                 _eraseGestureBatchGuard = false;
@@ -414,6 +450,7 @@ namespace InkCanvasForPDF.Board
         }
         private void inkCanvas_ManipulationStarting(object sender, ManipulationStartingEventArgs e)
         {
+            _boardPinchDist = 0;
             e.Mode = ManipulationModes.All;
         }
 
@@ -422,8 +459,30 @@ namespace InkCanvasForPDF.Board
 
         }
 
+        /// <summary>当前两指距离（画板坐标）；不足两指返回 0。WPF 单 manipulator 时 md.Scale 恒 1，缩放倍率须自算。</summary>
+        private double CurrentBoardPinchDistance()
+        {
+            if (_boardTouchPoints.Count < 2)
+                return 0;
+            Point a = default, b = default;
+            int i = 0;
+            foreach (var p in _boardTouchPoints.Values)
+            {
+                if (i++ == 0) a = p;
+                else { b = p; break; }
+            }
+            return (a - b).Length;
+        }
+
+        private void Board_TouchMoveTrack(object? sender, TouchEventArgs e)
+            => _boardTouchPoints[e.TouchDevice.Id] = e.GetTouchPoint(inkCanvas).Position;
+
+        private void Board_TouchUpTrack(object? sender, TouchEventArgs e)
+            => _boardTouchPoints.Remove(e.TouchDevice.Id);
+
         private void Main_Grid_ManipulationCompleted(object sender, ManipulationCompletedEventArgs e)
         {
+            _boardPinchDist = 0;
             if (e.Manipulators.Count() == 0)
             {
                 if (forceEraser) return;
@@ -438,6 +497,19 @@ namespace InkCanvasForPDF.Board
             {
                 ManipulationDelta md = e.DeltaManipulation;
                 Vector trans = md.Translation;  // 获得位移矢量
+                // WPF 单 manipulator（第一指被 inkCanvas 捕获）时 md.Scale 恒 1：用自跟踪的两指距离算倍率
+                double selfScale = 1.0;
+                double pinch = CurrentBoardPinchDistance();
+                if (pinch > 1)
+                {
+                    if (_boardPinchDist > 1)
+                        selfScale = pinch / _boardPinchDist;
+                    _boardPinchDist = pinch;
+                }
+                double rotate = md.Rotation;   // 获得旋转角度
+                Vector scale = md.Scale;       // 获得缩放倍数
+                if (Math.Abs(scale.X - 1.0) <= 0.005 && Math.Abs(selfScale - 1.0) > 0.005)
+                    scale = new Vector(selfScale, selfScale);   // WPF 单 manipulator 兜底：用自算倍率
 
                 Matrix m = new Matrix();
 
@@ -446,9 +518,6 @@ namespace InkCanvasForPDF.Board
 
                 if (Settings.Gesture.IsEnableTwoFingerGestureTranslateOrRotation && e.Source is FrameworkElement fe)
                 {
-                    double rotate = md.Rotation;  // 获得旋转角度
-                    Vector scale = md.Scale;  // 获得缩放倍数
-
                     // Find center of element and then transform to get current location of center
                     Point center = new Point(fe.ActualWidth / 2, fe.ActualHeight / 2);
                     center = m.Transform(center);  // 转换为矩阵缩放和旋转的中心点
@@ -481,8 +550,8 @@ namespace InkCanvasForPDF.Board
                         {
                             try
                             {
-                                stroke.DrawingAttributes.Width *= md.Scale.X;
-                                stroke.DrawingAttributes.Height *= md.Scale.Y;
+                                stroke.DrawingAttributes.Width *= scale.X;
+                                stroke.DrawingAttributes.Height *= scale.Y;
                             }
                             catch { }
                         }
@@ -497,8 +566,8 @@ namespace InkCanvasForPDF.Board
                             stroke.Transform(m, false);
                             try
                             {
-                                stroke.DrawingAttributes.Width *= md.Scale.X;
-                                stroke.DrawingAttributes.Height *= md.Scale.Y;
+                                stroke.DrawingAttributes.Width *= scale.X;
+                                stroke.DrawingAttributes.Height *= scale.Y;
                             }
                             catch { }
                         };

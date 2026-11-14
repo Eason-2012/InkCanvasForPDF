@@ -202,6 +202,7 @@ public sealed class TimePressureController
     private readonly Dictionary<int, bool> _stylusTablets = new();   // tabletDeviceId → 是否数位笔（缓存）
 
     private int _primaryDeviceId = -1;        // InkCanvas 原生收墨的那支（首个落笔设备）
+    private int _frozenPrimaryDeviceId = -1;  // 双指手势冻结时刻的主设备（定格清场后恢复用）
     private long _sessionToken;               // 会话令牌自增（锁内）
     private volatile bool _collectArmed;      // 时间笔锋（主设备）武装
     private volatile bool _shieldArmed;       // 硬笔 0/1 屏蔽压感（主设备）武装
@@ -318,6 +319,28 @@ public sealed class TimePressureController
             EndSession(id);
     }
 
+    /// <summary>停墨保留重建用：结束会话并清空湿墨，但保留主设备身份与落笔设备集合
+    /// （双指手势中第一指仍未抬起，第二指不得被误认成主设备开始新的湿墨采集）。
+    /// 定格（FreezeFinalize）内部会 EndSession 并把主设备清成 -1，故优先用冻结时刻记下的主设备。</summary>
+    public void AbortStrokeKeepPrimary()
+    {
+        List<int> ids;
+        int primary;
+        lock (_sync)
+        {
+            ids = new List<int>(_sessions.Keys);
+            primary = _frozenPrimaryDeviceId != -1 ? _frozenPrimaryDeviceId : _primaryDeviceId;
+            _frozenPrimaryDeviceId = -1;
+        }
+        foreach (var id in ids)
+            EndSession(id);
+        lock (_sync)
+        {
+            if (primary != -1)
+                _primaryDeviceId = primary;   // EndSession 会把它清成 -1：这里恢复，第二指仍不是主设备
+        }
+    }
+
     /// <summary>中断指定设备的会话（手掌擦除等：只丢弃该设备的湿墨，不影响其他手指）。</summary>
     public void AbortStroke(int deviceId) => EndSession(deviceId);
 
@@ -326,8 +349,11 @@ public sealed class TimePressureController
     public void FreezeCollectAll()
     {
         lock (_sync)
+        {
+            _frozenPrimaryDeviceId = _primaryDeviceId;   // 定格内 EndSession 会清主设备，这里留底给 AbortStrokeKeepPrimary 恢复
             foreach (var session in _sessions.Values)
                 session.Frozen = true;
+        }
     }
 
     /// <summary>指定设备当前是否有在绘会话（画板宿主据此跳过 StrokeVisual 自绘）。</summary>
@@ -349,6 +375,8 @@ public sealed class TimePressureController
         {
             if (!_sessions.TryGetValue(deviceId, out var session) || session.UpElapsedMs > 0)
                 return;
+            if (session.Frozen)
+                return;   // 双指手势保留中：样本要留给重建后的定格
             if (session.Clock.Elapsed.TotalMilliseconds - session.LastSampleElapsedMs < minIdleMs)
                 return;   // 仍在收点：不是僵死会话
         }
@@ -620,11 +648,6 @@ public sealed class TimePressureController
                 {
                     DrawingAttributes = _canvas.DefaultDrawingAttributes.Clone()
                 };
-                // 自绘笔画按采样里的真实压力渲染：DA 是从画布克隆的，会继承宿主各处开关
-                // （荧光笔/关闭笔锋+硬笔时为 true），那会让整笔等宽、真实压力白采。
-                // 软笔（PressureEnabled）下显式关闭忽略压力；荧光笔的"等宽"语义仍由宿主开关决定。
-                if (PressureEnabled && !stroke.DrawingAttributes.IsHighlighter)
-                    stroke.DrawingAttributes.IgnorePressure = false;
                 stroke.AddPropertyData(SelfDrawnDeviceGuid, deviceId);
             }
         }
@@ -841,6 +864,7 @@ public sealed class TimePressureController
         List<TimePressureSample>? snapshot = null;
         double now = 0;
         double growMs = GrowMs;
+        Stopwatch? clock = null;
         lock (_sync)
         {
             if (_sessions.TryGetValue(deviceId, out var session))
@@ -852,6 +876,7 @@ public sealed class TimePressureController
                 now = session.UpElapsedMs > 0
                     ? session.UpElapsedMs
                     : session.LastSampleElapsedMs;
+                clock = session.Clock;   // 单点补长动画用：EndSession 只移除会话，Stopwatch 仍在走
             }
         }
 
@@ -866,6 +891,7 @@ public sealed class TimePressureController
             double t0 = haveSamples ? snapshot[0].T : 0.0;
 
             var rebuilt = new StylusPointCollection();
+            double birth0 = 0, cap0 = 0;   // 单点补长用：唯一点的出生时刻与终压
             for (int i = 0; i < count; i++)
             {
                 double birth;
@@ -894,12 +920,48 @@ public sealed class TimePressureController
 
                 double age = now - birth;
                 double pressure = tip + (cap - tip) * Math.Min(1.0, Math.Max(0.0, age / Math.Max(1.0, growMs)));
+                if (i == 0)
+                {
+                    birth0 = birth;
+                    cap0 = cap;
+                }
                 rebuilt.Add(new StylusPoint(stylusPoints[i].X, stylusPoints[i].Y, (float)pressure));
             }
             stroke.StylusPoints = rebuilt;
+
+            // 单点圆点：抬笔时点龄不足 → 不定格，逐帧补长至终宽（补足剩余生长时间）
+            if (count == 1 && clock is not null && GrowMs - (now - birth0) > 1.0)
+                StartDotGrowth(stroke, birth0, cap0, tip, clock, growMs);
         }
 
         EndSession(deviceId);
+    }
+
+    /// <summary>单点圆点补长：抬笔定格时点龄未满 GrowMs，不停格在针尖细线，
+    /// 用短生命周期 DispatcherTimer 逐帧把该点压力按生长公式补到终宽（补足剩余生长时间）。
+    /// 只改压力不改坐标：不触发 StrokeCollected、不写撤销历史；笔画若已被擦除/撤销，
+    /// 改写一个不在集合中的 Stroke 无可见效果，无需成员校验。</summary>
+    private void StartDotGrowth(Stroke stroke, double birth, double cap, double tip, Stopwatch clock, double growMs)
+    {
+        var timer = new DispatcherTimer(DispatcherPriority.Render, _overlay.Dispatcher)
+        {
+            Interval = TimeSpan.FromMilliseconds(16)
+        };
+        timer.Tick += (_, _) =>
+        {
+            double age = clock.Elapsed.TotalMilliseconds - birth;
+            double pressure = tip + (cap - tip) * Math.Min(1.0, Math.Max(0.0, age / Math.Max(1.0, growMs)));
+            var points = new StylusPointCollection(1);
+            var src = stroke.StylusPoints[0];
+            points.Add(new StylusPoint(src.X, src.Y, (float)pressure));
+            stroke.StylusPoints = points;
+            if (age >= growMs)
+            {
+                timer.Stop();
+                timer = null!;
+            }
+        };
+        timer.Start();
     }
 
     private void EndSession(int deviceId)

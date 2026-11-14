@@ -377,7 +377,7 @@
                                                     <Image Source="{Binding Image}"
                                                            Width="{Binding Width}"
                                                            Height="{Binding Height}"
-                                                           Stretch="None"
+                                                           Stretch="Fill"
                                                            RenderOptions.BitmapScalingMode="HighQuality"/>
                                                 </Border>
                                                 <Border CornerRadius="6">
@@ -408,8 +408,9 @@
 
             <!-- 页面区 -->
             <Grid Grid.Column="1">
-                <!-- PDF 页面（打开后显示）：KillerPDF 式布局——纯 ScrollViewer + 居中页槽（ItemsControl/StackPanel），
-                     逐页 LayoutTransform 缩放 + WidthScale 宽度补偿；无 ListBox 虚拟化（页槽常驻，位图级释放）。
+                <!-- PDF 页面（打开后显示）：单 ScrollViewer + StackPanel 页槽（对齐 KillerPDF 连续视图）——
+                     页槽全量但极轻（Border/Grid/Image），墨迹画布只在可见范围 ±缓冲 时挂载；
+                     整层 LayoutTransform 等比缩放，页槽尺寸固定 → 滚动位置由前缀和 O(1) 计算，无占位闪动。
                      PanningMode=None：内置触摸平移不看手指数（单指会抢书写、换指瞬间质心跳变会跳视图），
                      平移/缩放/惯性由 MainWindow.xaml.cs 的 PagesControl_Manipulation* 按手指数门控接管。 -->
                 <ScrollViewer x:Name="PagesScrollViewer"
@@ -426,37 +427,21 @@
                               Visibility="{Binding HasPdf, Converter={StaticResource BoolToVisibility}}">
                     <Border Padding="12" HorizontalAlignment="Center" VerticalAlignment="Top">
                         <Grid HorizontalAlignment="Center" VerticalAlignment="Top">
-                            <!-- 整层等比缩放（槽位固定）：DisplayScale = 用户缩放 × 宽度适配。
-                                 页面尺寸固定不重建 → 宽度变化无占位闪动 -->
+                            <!-- 整层等比缩放（槽位固定）：DisplayScale = 用户缩放 × 宽度适配 -->
                             <Grid.LayoutTransform>
                                 <ScaleTransform ScaleX="{Binding DisplayScale}" ScaleY="{Binding DisplayScale}"/>
                             </Grid.LayoutTransform>
-                        <ItemsControl x:Name="PagesItemsControl" ItemsSource="{Binding Pages}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <StackPanel Orientation="Vertical"/>
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Border Margin="0,0,0,12" HorizontalAlignment="Center"
-                                            Background="{DynamicResource CardBackgroundBrush}"
-                                            BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1">
-                                        <!-- 外层 = 旋转后的显示槽位（参与布局/滚动前缀和）；PDF 位图由渲染层按该页旋转角原生旋转，
-                                             位图尺寸即槽位尺寸，不会再被裁掉两头。
-                                             墨迹层保持未旋转坐标系，用 RotateTransform 仅做显示旋转（内容尺寸旋转后的包围盒 = 槽位尺寸） -->
-                                        <Grid Width="{Binding Width}" Height="{Binding Height}">
-                                            <Image Source="{Binding Image}"
-                                                   Width="{Binding Width}"
-                                                   Height="{Binding Height}"
-                                                   Stretch="None"
-                                                   RenderOptions.BitmapScalingMode="{Binding DataContext.IsZooming, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource ZoomScalingMode}}"/>
-                                            <Grid Width="{Binding ContentWidth}" Height="{Binding ContentHeight}"
-                                                  HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                  RenderTransformOrigin="0.5,0.5">
-                                                <Grid.RenderTransform>
-                                                    <RotateTransform Angle="{Binding Rotation}"/>
-                                                </Grid.RenderTransform>
+                            <ItemsControl x:Name="PagesItemsControl" ItemsSource="{Binding Pages}">
+                                <ItemsControl.Resources>
+                                    <!-- 页面墨迹表面：仅在页进入可见范围 ±缓冲 时由 ContentControl 挂载，
+                                         滚出即销毁 InkCanvas；Strokes 保存在 PageModel，滚回自动重建。 -->
+                                    <DataTemplate x:Key="PageSurfaceTemplate">
+                                        <Grid Width="{Binding ContentWidth}" Height="{Binding ContentHeight}"
+                                              HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              RenderTransformOrigin="0.5,0.5">
+                                            <Grid.RenderTransform>
+                                                <RotateTransform Angle="{Binding Rotation}"/>
+                                            </Grid.RenderTransform>
                                             <!-- PageInkCanvas = InkCanvas 子类：构造函数内替换为时间笔锋的自定义 DynamicRenderer（该属性为 protected，无法外部替换） -->
                                             <ink:PageInkCanvas Strokes="{Binding Strokes}"
                                                        Width="{Binding ContentWidth}"
@@ -501,12 +486,53 @@
                                                 PreviewTouchDown="GridInkCanvasSelectionCover_PreviewTouchDown"
                                                 PreviewTouchUp="GridInkCanvasSelectionCover_PreviewTouchUp"
                                                 Visibility="Collapsed" />
-                                            </Grid>
                                         </Grid>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
+                                    </DataTemplate>
+                                    <!-- 共享宿主样式：避免每个页槽各自创建一份 Style/Trigger（1 万页时省大量对象） -->
+                                    <Style x:Key="PageSurfaceHostStyle" TargetType="ContentControl">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsMaterialized}" Value="True">
+                                                <Setter Property="ContentTemplate" Value="{StaticResource PageSurfaceTemplate}"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ItemsControl.Resources>
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Vertical"/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <!-- 页槽：宽度 = 页面列宽（撑满可视宽，页面在项内居中）；
+                                             第 0 行 = 页面槽位，第 1 行 = 页间距（12 DIP，随整层缩放一起放大） -->
+                                        <Grid Width="{Binding DataContext.PageColumnWidthBase, RelativeSource={RelativeSource AncestorType=Window}}">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="12"/>
+                                            </Grid.RowDefinitions>
+                                            <Border Grid.Row="0" HorizontalAlignment="Center"
+                                                    Background="{DynamicResource CardBackgroundBrush}"
+                                                    BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1">
+                                                <!-- 外层 = 旋转后的显示槽位（参与布局/滚动前缀和）；PDF 位图由渲染层按该页旋转角原生旋转，
+                                                     位图尺寸即槽位尺寸，不会再被裁掉两头。
+                                                     墨迹层保持未旋转坐标系，用 RotateTransform 仅做显示旋转（内容尺寸旋转后的包围盒 = 槽位尺寸） -->
+                                                <Grid Width="{Binding Width}" Height="{Binding Height}">
+                                                    <Image Source="{Binding Image}"
+                                                           Width="{Binding Width}"
+                                                           Height="{Binding Height}"
+                                                           Stretch="None"
+                                                           RenderOptions.BitmapScalingMode="{Binding DataContext.IsZooming, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource ZoomScalingMode}}"/>
+                                                    <!-- 墨迹层按需挂载：未挂载时 Content 与 ContentTemplate 均为空 → 不生成 InkCanvas -->
+                                                    <ContentControl Content="{Binding MaterializedContent}"
+                                                                    Style="{StaticResource PageSurfaceHostStyle}"
+                                                                    HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                </Grid>
+                                            </Border>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
                         </Grid>
                     </Border>
                 </ScrollViewer>

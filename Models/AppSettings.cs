@@ -87,13 +87,13 @@ public class AppSettings
     [JsonPropertyName("isNibModeEnabled")]
     public bool IsNibModeEnabled { get; set; } = false;
 
-    /// <summary>笔尖模式接触面积阈值（ICA nibModeBoundsWidth 默认 10）。</summary>
+    /// <summary>笔尖模式接触面积阈值（默认 50）。</summary>
     [JsonPropertyName("nibModeBoundsWidth")]
-    public int NibModeBoundsWidth { get; set; } = 10;
+    public int NibModeBoundsWidth { get; set; } = 50;
 
-    /// <summary>手指档接触面积阈值（ICA fingerModeBoundsWidth 默认 30）。</summary>
+    /// <summary>手指档接触面积阈值（默认 175）。</summary>
     [JsonPropertyName("fingerModeBoundsWidth")]
-    public int FingerModeBoundsWidth { get; set; } = 30;
+    public int FingerModeBoundsWidth { get; set; } = 175;
 
     /// <summary>是否显示浮动工具栏文字注释（抄 ICA isEnableDisPlayFloatBarText）。</summary>
     [JsonPropertyName("isEnableDisPlayFloatBarText")]

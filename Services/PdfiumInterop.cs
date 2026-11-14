@@ -62,12 +62,36 @@ internal static class PdfiumInterop
     [DllImport("pdfium.dll", EntryPoint = "FPDF_GetPageHeight", CallingConvention = CallingConvention.Cdecl)]
     private static extern double FPDF_GetPageHeightRaw(IntPtr page);
 
-    /// <summary>取某页原生尺寸（pt）。持锁 LoadPage→读尺寸→ClosePage；句柄无效返回 (0,0)。</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FS_SIZEF
+    {
+        public float Width;
+        public float Height;
+    }
+
+    [DllImport("pdfium.dll", EntryPoint = "FPDF_GetPageSizeByIndexF", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int FPDF_GetPageSizeByIndexFRaw(IntPtr document, int pageIndex, out FS_SIZEF size);
+
+    private static bool _fastSizeUnavailable;   // 导出符号不存在时回退旧路径，只尝试一次
+
+    /// <summary>取某页原生尺寸（pt）。优先走 FPDF_GetPageSizeByIndexF（不创建 page 句柄，万页文档可省大量开销），
+    /// 符号不可用或返回失败时回退 LoadPage→读尺寸→ClosePage；句柄无效返回 (0,0)。</summary>
     internal static (double W, double H) GetPageSize(IntPtr document, int pageIndex)
     {
         lock (PdfiumLock)
         {
             if (document == IntPtr.Zero) return (0, 0);
+            if (!_fastSizeUnavailable)
+            {
+                try
+                {
+                    if (FPDF_GetPageSizeByIndexFRaw(document, pageIndex, out var s) != 0
+                        && s.Width > 0 && s.Height > 0)
+                        return (s.Width, s.Height);
+                }
+                catch (EntryPointNotFoundException) { _fastSizeUnavailable = true; }
+                catch (DllNotFoundException) { _fastSizeUnavailable = true; }
+            }
             IntPtr page = FPDF_LoadPageRaw(document, pageIndex);
             if (page == IntPtr.Zero) return (0, 0);
             try { return (FPDF_GetPageWidthRaw(page), FPDF_GetPageHeightRaw(page)); }

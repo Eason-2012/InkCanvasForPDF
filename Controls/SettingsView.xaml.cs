@@ -686,28 +686,28 @@ public partial class SettingsView : System.Windows.Controls.UserControl
         SettingsService.Save(vm.Settings);
     }
 
-    /// <summary>手掌模式触摸阈值输入：解析并钳制 1~200px 后写回 FingerModeBoundsWidth 并存盘。</summary>
+    /// <summary>手掌模式触摸阈值输入：解析并钳制 0~9999px 后写回 FingerModeBoundsWidth 并存盘。</summary>
     private void PalmModeThresholdBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (Vm is not { } vm)
             return;
         if (!int.TryParse(PalmModeThresholdBox.Text.Trim(), out int px))
             return;   // 中途输入（空串/负号等）不处理，保留上次有效值
-        px = Math.Clamp(px, 1, 200);
+        px = Math.Clamp(px, 0, 9999);
         if (vm.Settings.FingerModeBoundsWidth == px)
             return;   // 回填或同值：不重复存盘
         vm.Settings.FingerModeBoundsWidth = px;
         SettingsService.Save(vm.Settings);
     }
 
-    /// <summary>笔尖模式触摸阈值输入：解析并钳制 1~200px 后写回 NibModeBoundsWidth 并存盘。</summary>
+    /// <summary>笔尖模式触摸阈值输入：解析并钳制 0~9999px 后写回 NibModeBoundsWidth 并存盘。</summary>
     private void NibModeThresholdBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (Vm is not { } vm)
             return;
         if (!int.TryParse(NibModeThresholdBox.Text.Trim(), out int px))
             return;
-        px = Math.Clamp(px, 1, 200);
+        px = Math.Clamp(px, 0, 9999);
         if (vm.Settings.NibModeBoundsWidth == px)
             return;
         vm.Settings.NibModeBoundsWidth = px;
