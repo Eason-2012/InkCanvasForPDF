@@ -600,6 +600,15 @@ namespace InkCanvasForPDF.Board
             RefreshTimePressureArmed();
         }
 
+        private bool _singleDotNoFreezeEnabled = true;
+
+        /// <summary>单墨迹点抬手后不定格（主设置 singleDotNoFreezeEnabled；由 MainWindow 注入）。</summary>
+        public void ApplySingleDotNoFreezeEnabled(bool enabled)
+        {
+            _singleDotNoFreezeEnabled = enabled;
+            RefreshTimePressureArmed();
+        }
+
         private bool _brushInkStyleEnabled = true;
         private bool _highlighterInkStyleEnabled = true;
 

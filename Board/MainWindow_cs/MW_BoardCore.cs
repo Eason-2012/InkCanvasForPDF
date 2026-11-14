@@ -110,6 +110,7 @@ namespace InkCanvasForPDF.Board
             c.PressureEnabled = _pressureEnabled;
             c.GrowMs = TimePenGrowMs;
             c.HighlighterPressureEnabled = _highlighterPressureEnabled;
+            c.SingleDotNoFreezeEnabled = _singleDotNoFreezeEnabled;
             // 书写模式 = 画笔工具 + 非形状手绘；橡皮/选择/形状一律视为非书写，时间笔锋整体不介入
             bool penMode = !forceEraser && drawingShapeMode == 0;
             bool inkMode = penMode && (isInMultiTouchMode

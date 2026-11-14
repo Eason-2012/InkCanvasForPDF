@@ -278,6 +278,9 @@ public sealed class TimePressureController
     /// <summary>「荧光笔启用压力感应」开关：关闭（默认）时荧光笔湿墨封顶压力恒 0.5（等粗），开启时吃硬件压力。</summary>
     public bool HighlighterPressureEnabled { get; set; }
 
+    /// <summary>「单墨迹点抬手后不定格」开关：开启（默认）时单点圆点抬笔后逐帧补长至终宽，关闭时按点龄一次性定格。</summary>
+    public bool SingleDotNoFreezeEnabled { get; set; } = true;
+
     /// <summary>自绘笔画提交事件（UI 线程）：宿主 Add 到 Strokes 并走既有收笔处理（笔锋改写/墨迹纠正/撤销）。</summary>
     public event Action<Stroke, int>? StrokeReady;
 
@@ -930,7 +933,7 @@ public sealed class TimePressureController
             stroke.StylusPoints = rebuilt;
 
             // 单点圆点：抬笔时点龄不足 → 不定格，逐帧补长至终宽（补足剩余生长时间）
-            if (count == 1 && clock is not null && GrowMs - (now - birth0) > 1.0)
+            if (SingleDotNoFreezeEnabled && count == 1 && clock is not null && GrowMs - (now - birth0) > 1.0)
                 StartDotGrowth(stroke, birth0, cap0, tip, clock, growMs);
         }
 

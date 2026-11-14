@@ -276,9 +276,41 @@ public static class UpdateService
         return null;
     }
 
+    // ══════════ 回滚 ══════════
+
+    /// <summary>回滚弹窗用的版本信息（tag 原文 + 预发布 + 发布日期 + 本机架构安装包地址）。</summary>
+    public sealed record ReleaseInfo(string Tag, bool IsPrerelease, string PublishedAt, string AssetUrl);
+
+    /// <summary>拉取全部 Releases 供回滚版本单选列表展示：不过滤通道与新旧，仅过滤草稿与空 tag；
+    /// 无本机架构安装包的版本 AssetUrl 为空串（确认下载时再报错）。</summary>
+    public static async Task<List<ReleaseInfo>> GetAllReleasesAsync(AppSettings s, CancellationToken ct = default)
+    {
+        var releases = await FetchReleasesAsync(s, ct);
+        var list = new List<ReleaseInfo>();
+        foreach (var item in releases.OfType<JsonObject>())
+        {
+            if (item["draft"] is JsonValue dv && dv.TryGetValue(out bool draft) && draft)
+                continue;                               // 草稿不进列表
+            var tag = GetString(item, "tag_name");
+            if (string.IsNullOrWhiteSpace(tag))
+                continue;
+            var isPrerelease = item["prerelease"] is JsonValue pv && pv.TryGetValue(out bool pre) && pre;
+
+            var published = GetString(item, "published_at");
+            published = DateTimeOffset.TryParse(published, out var dto)
+                ? dto.LocalDateTime.ToString("yyyy/M/d")
+                : published;
+
+            list.Add(new ReleaseInfo(tag, isPrerelease, published, FindAsset(item, SetupFileName) ?? ""));
+        }
+        return list;
+    }
+
     // ══════════ 下载 ══════════
 
-    /// <summary>低优先级后台线程流式下载安装包到 Data\Updates\，按字节回报进度；失败删除半截文件。</summary>
+    /// <summary>低优先级后台线程流式下载安装包到 Data\Updates\，按字节回报进度。
+    /// 半截文件存为「文件名.版本.part」并在中断/取消后保留，再次下载同一版本时带 Range 请求断点续传；
+    /// 服务器不支持 Range（返回 200）则自动从头重下；完成后原子移动为正式安装包（正式文件存在即完整）。</summary>
     public static Task DownloadAsync(UpdateCheckResult r, AppSettings s, IProgress<double>? progress, CancellationToken ct) =>
         Task.Run(() =>
         {
@@ -286,22 +318,34 @@ public static class UpdateService
             Thread.CurrentThread.Priority = ThreadPriority.BelowNormal;
 
             var url = (s.UpdateProxy ?? "") + r.AssetUrl;
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            using var response = Client.Send(request, HttpCompletionOption.ResponseHeadersRead, ct);
-            response.EnsureSuccessStatusCode();
-
             var target = GetSetupPath();
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
 
-            long total = response.Content.Headers.ContentLength ?? -1;
-            long done = 0;
+            // 版本进 part 文件名：不同版本的半截文件互不续传，避免拼出混合文件。
+            var part = target + "." + r.Version + ".part";
+            long offset = File.Exists(part) ? new FileInfo(part).Length : 0;
+            if (offset > 0)
+                ConsoleLog.Write("应用更新", $"断点续传: 版本={r.Version}, 已有={offset} 字节");
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            if (offset > 0)
+                request.Headers.Range = new RangeHeaderValue(offset, null);
+            using var response = Client.Send(request, HttpCompletionOption.ResponseHeadersRead, ct);
+            response.EnsureSuccessStatusCode();
+
+            // 206 = 服务器接受续传；其余状态视为不支持 Range，从头重下。
+            bool resumed = offset > 0 && response.StatusCode == System.Net.HttpStatusCode.PartialContent;
+            long total = resumed
+                ? response.Content.Headers.ContentRange?.Length ?? -1
+                : response.Content.Headers.ContentLength ?? -1;
+            long done = resumed ? offset : 0;
             double lastReported = -1;
             var buffer = new byte[81920];
 
-            try
+            // 中途失败/取消不清除 part，留给下次断点续传；只有全部读完才移动为正式包。
+            using (var source = response.Content.ReadAsStream())
+            using (var destination = new FileStream(part, resumed ? FileMode.Append : FileMode.Create, FileAccess.Write))
             {
-                using var source = response.Content.ReadAsStream();
-                using var destination = File.Create(target);
                 int read;
                 while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
                 {
@@ -318,13 +362,13 @@ public static class UpdateService
                         }
                     }
                 }
-                progress?.Report(100);
             }
-            catch
-            {
-                try { File.Delete(target); } catch { /* 半截文件清理失败不阻塞 */ }
-                throw;
-            }
+
+            if (total > 0 && done < total)
+                throw new IOException("下载中断");
+
+            File.Move(part, target, true);
+            progress?.Report(100);
         }, ct);
 
     // ══════════ 主流程（手动检查与启动自动检查共用）══════════
@@ -435,6 +479,86 @@ public static class UpdateService
         InvalidOperationException => ex.Message,     // 资产缺失等带说明的业务异常
         _ => ex.Message,
     };
+
+    // ══════════ 回滚下载 ══════════
+
+    /// <summary>回滚下载流程（同更新下载的状态流转）：下载选中版本安装包 → 待安装态，
+    /// 之后复用「立即更新」与退出静默安装两条既有路径。</summary>
+    /// <param name="s">当前设置（待装标记经此存盘）。</param>
+    /// <param name="release">回滚弹窗选中的版本。</param>
+    /// <param name="notify">浮动通知回调（开始/完成/失败均播报）。</param>
+    public static async Task RunRollbackAsync(AppSettings s, ReleaseInfo release, Action<string, InfoBarSeverity>? notify)
+    {
+        if (_busy)
+            return;
+        _busy = true;
+        try
+        {
+            // 与检查流程同规：标记存去后缀的解析版本（如 1.0.0.5），装完重启后 CleanupInstalledMarker 才能识别清理。
+            var version = TryParseTagVersion(release.Tag, out var parsed)
+                ? parsed.ToString()
+                : release.Tag.TrimStart('v', 'V');
+            ConsoleLog.Write("应用更新", $"回滚开始: 版本={version}, 预发布={release.IsPrerelease}");
+
+            if (string.IsNullOrEmpty(release.AssetUrl))
+            {
+                Fail($"版本 {release.Tag} 未提供 {SetupFileName} 安装包", notify);
+                return;
+            }
+
+            // 包已在（同版本）：不重复下载，直接进入待安装态。
+            if (s.DownloadedUpdateVersion == version && File.Exists(GetSetupPath()))
+            {
+                ConsoleLog.Write("应用更新", $"跳过下载: 回滚包已存在, 版本={version}");
+                PendingVersion = version;
+                SetState(UpdateState.ReadyToInstall);
+                return;
+            }
+
+            PendingVersion = version;
+            notify?.Invoke($"正在下载所选版本 {version}", InfoBarSeverity.Success);
+            DownloadProgress = 0;
+            SetState(UpdateState.Downloading);
+
+            try
+            {
+                var progress = new Progress<double>(p =>
+                {
+                    DownloadProgress = p;
+                    ProgressChanged?.Invoke();
+                });
+                await DownloadAsync(new UpdateCheckResult(version, release.AssetUrl, "", release.IsPrerelease), s, progress, CancellationToken.None);
+            }
+            catch (OperationCanceledException)
+            {
+                Fail("下载已取消", notify);
+                return;
+            }
+            catch (Exception ex)
+            {
+                Fail(FriendlyReason(ex), notify);
+                return;
+            }
+
+            s.DownloadedUpdateVersion = version;
+            SettingsService.Save(s);
+            ConsoleLog.Write("应用更新", $"回滚包下载完成: 文件={GetSetupPath()}, 版本={version}");
+            notify?.Invoke($"已下载 {version}，可点击立即更新或关闭应用完成回滚", InfoBarSeverity.Success);
+            SetState(UpdateState.ReadyToInstall);
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        void Fail(string reason, Action<string, InfoBarSeverity>? notifyCallback)
+        {
+            ErrorMessage = reason;
+            ConsoleLog.Write("应用更新", $"回滚失败: 原因={reason}");
+            SetState(UpdateState.Error);
+            notifyCallback?.Invoke($"回滚失败：{reason}", InfoBarSeverity.Error);
+        }
+    }
 
     // ══════════ 安装 ══════════
 

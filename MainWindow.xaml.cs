@@ -142,6 +142,12 @@ public partial class MainWindow : Window
             Board.ApplyHighlighterPressureEnabled(enabled);
         };
         Board.ApplyHighlighterPressureEnabled(_viewModel.Settings.HighlighterPressureEnabled);   // 启动即同步一次
+        SettingsView.SingleDotNoFreezeChanged += enabled =>           // 单墨迹点抬手后不定格即时同步 PDF 与画板
+        {
+            RefreshTimePressureArmed();
+            Board.ApplySingleDotNoFreezeEnabled(enabled);
+        };
+        Board.ApplySingleDotNoFreezeEnabled(_viewModel.Settings.SingleDotNoFreezeEnabled);   // 启动即同步一次
         SettingsView.BrushInkStyleChanged += enabled =>            // 毛笔墨迹样式即时同步画板笔尖
             Board.ApplyBrushInkStyle(enabled);
         Board.ApplyBrushInkStyle(_viewModel.Settings.BrushInkStyleEnabled);   // 启动即同步一次
@@ -1824,6 +1830,7 @@ public partial class MainWindow : Window
         pageCanvas.Controller.PressureEnabled = _viewModel.InkTool.PressureEnabled;
         pageCanvas.Controller.GrowMs = _viewModel.Settings.TimePenGrowMs;
         pageCanvas.Controller.HighlighterPressureEnabled = _viewModel.Settings.HighlighterPressureEnabled;
+        pageCanvas.Controller.SingleDotNoFreezeEnabled = _viewModel.Settings.SingleDotNoFreezeEnabled;
         pageCanvas.Controller.SetCollectArmed(armed);
         pageCanvas.Controller.SetShieldArmed(shield);
         // 多指书写全自绘：画笔模式下关闭原生命中管线，全部设备由叠加层自绘并自提交。

@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Threading;
 using iNKORE.UI.WPF.Modern;
 
@@ -21,6 +22,24 @@ public partial class App : Application
 
     [System.Runtime.InteropServices.DllImport("kernel32.dll")]
     private static extern bool AttachConsole(int dwProcessId);
+
+    /// <summary>触摸滚动：把 ScrollViewer 的 PanningMode 默认值改为 VerticalOnly（纵向平移 + 甩动惯性），
+    /// 让设置页/弹窗/菜单等手指滑动可滚。用默认值覆盖而非 App.xaml 隐式样式——隐式样式会顶掉 iNKORE 的
+    /// ScrollViewer 样式（滚动条 Auto 可见性 + 细滚动条），导致菜单弹层常驻系统滚动条、项右外边距变大。
+    /// 必须在任何 ScrollViewer 实例创建前执行，故放在静态构造函数（早于 App.xaml 解析与窗口创建）。</summary>
+    static App()
+    {
+        try
+        {
+            ScrollViewer.PanningModeProperty.OverrideMetadata(
+                typeof(ScrollViewer),
+                new FrameworkPropertyMetadata(PanningMode.VerticalOnly));
+        }
+        catch (Exception ex)
+        {
+            Log("App.StaticCtor", ex);   // 已被密封等罕见情况：放弃触摸平移，不阻塞启动
+        }
+    }
 
     protected override void OnStartup(StartupEventArgs e)
     {

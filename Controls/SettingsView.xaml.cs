@@ -32,6 +32,9 @@ public partial class SettingsView : System.Windows.Controls.UserControl
     /// <summary>「荧光笔启用压力感应」切换时触发（由 MainWindow 同步 PDF 页面控制器与画板）。</summary>
     public event Action<bool>? HighlighterPressureChanged;
 
+    /// <summary>「单墨迹点抬手后不定格」切换时触发（由 MainWindow 同步 PDF 页面控制器与画板）。</summary>
+    public event Action<bool>? SingleDotNoFreezeChanged;
+
     /// <summary>「启用中国传统毛笔墨迹样式」切换时触发（由 MainWindow 同步画板笔尖，PDF 侧走 InkTool 即时生效）。</summary>
     public event Action<bool>? BrushInkStyleChanged;
 
@@ -417,6 +420,14 @@ public partial class SettingsView : System.Windows.Controls.UserControl
         SettingsService.Save(vm.Settings);
     }
 
+    private void SingleDotNoFreezeToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (Vm is not { } vm)
+            return;
+        SingleDotNoFreezeChanged?.Invoke(vm.Settings.SingleDotNoFreezeEnabled);   // 同步 PDF 与画板即时生效
+        SettingsService.Save(vm.Settings);
+    }
+
     private void BrushInkStyleToggle_Toggled(object sender, RoutedEventArgs e)
     {
         if (Vm is not { } vm)
@@ -479,9 +490,13 @@ public partial class SettingsView : System.Windows.Controls.UserControl
         SettingsService.Save(vm.Settings);
     }
 
-    /// <summary>时间笔锋长满时间卡片仅当笔锋样式 = 时间笔锋（3）时显示。</summary>
+    /// <summary>时间笔锋专属卡片（长满时间、单墨迹点抬手后不定格）仅当笔锋样式 = 时间笔锋（3）时显示。</summary>
     private void UpdateTimePenCardVisibility()
-        => TimePenGrowMsCard.Visibility = (Vm?.Settings.InkStyle == 3) ? Visibility.Visible : Visibility.Collapsed;
+    {
+        var visibility = (Vm?.Settings.InkStyle == 3) ? Visibility.Visible : Visibility.Collapsed;
+        TimePenGrowMsCard.Visibility = visibility;
+        SingleDotNoFreezeCard.Visibility = visibility;
+    }
 
     /// <summary>时间笔锋长满时间输入：解析并钳制 10~1000ms 后写回设置、存盘并通知 MainWindow 同步控制器。</summary>
     private void TimePenGrowMsBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -976,6 +991,103 @@ public partial class SettingsView : System.Windows.Controls.UserControl
             dialog.Content = ChangelogMarkdownView.CreatePlainTextFallback(
                 "获取更新日志失败：可能无法连接到 GitHub。");
         }
+    }
+
+    /// <summary>滚回到以前的版本：iuwm ContentDialog 先展示加载态，再回填 GitHub 全部版本单选列表（弹窗最大高度 500px）；
+    /// 确认后静默关闭自动检查更新（防止回滚重启后自动升回最新版，仅浮动通知不弹窗），下载选中版本进入待安装态。</summary>
+    private async void RollbackVersion_Click(object sender, RoutedEventArgs e)
+    {
+        if (Vm is not { } vm)
+            return;
+
+        var loading = new TextBlock { Text = "正在获取版本列表…", Margin = new Thickness(8) };
+        var dialog = new ContentDialog
+        {
+            Title = "滚回到以前的版本",
+            Content = loading,
+            PrimaryButtonText = "滚回到此版本",
+            CloseButtonText = "取消",
+            IsPrimaryButtonEnabled = false,   // 加载完成且选中版本前禁用确认
+            Owner = Window.GetWindow(this) ?? Application.Current.MainWindow,
+        };
+        // 只限制白色卡片高度（模板 BackgroundElement.MaxHeight 走此 DynamicResource，默认 756），
+        // 遮罩层不受影响仍铺满全窗；实例 Resources 查找优先于全局主题，不影响其它弹窗。
+        dialog.Resources["ContentDialogMaxHeight"] = 500d;
+        // 「滚回到此版本」用强调样式，与其它弹窗主按钮一致
+        dialog.SetResourceReference(iNKORE.UI.WPF.Modern.Controls.ContentDialog.PrimaryButtonStyleProperty,
+            iNKORE.UI.WPF.Modern.ThemeKeys.AccentButtonStyleKey);
+        var closing = dialog.ShowAsync();   // 先展示加载态，再异步回填列表（同「查看更新日志」模式）
+
+        UpdateService.ReleaseInfo? selected = null;
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var releases = await UpdateService.GetAllReleasesAsync(vm.Settings, timeout.Token);
+
+            if (releases.Count == 0)
+            {
+                dialog.Content = new TextBlock { Text = "GitHub 上没有可回滚的版本。", Margin = new Thickness(8) };
+            }
+            else
+            {
+                var current = UpdateService.CurrentVersion;
+                var panel = new StackPanel { Margin = new Thickness(4, 0, 4, 0) };
+                foreach (var release in releases)
+                {
+                    var marks = new List<string>();
+                    if (release.IsPrerelease)
+                        marks.Add("预发布");
+                    if (string.Equals(release.Tag.TrimStart('v', 'V'), current, StringComparison.OrdinalIgnoreCase))
+                        marks.Add("当前版本");
+                    var text = release.Tag
+                        + (marks.Count > 0 ? $"（{string.Join("、", marks)}）" : "")
+                        + (string.IsNullOrEmpty(release.PublishedAt) ? "" : $"　{release.PublishedAt}");
+
+                    var option = new RadioButton
+                    {
+                        GroupName = "RollbackVersions",
+                        Content = text,
+                        Margin = new Thickness(0, 4, 0, 4),
+                    };
+                    var captured = release;   // foreach 变量闭包安全
+                    option.Checked += (_, _) =>
+                    {
+                        selected = captured;
+                        dialog.IsPrimaryButtonEnabled = true;
+                    };
+                    panel.Children.Add(option);
+                }
+                dialog.Content = new ScrollViewer
+                {
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    Content = panel,
+                };
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log("Update.GetReleases", ex);
+            dialog.Content = new TextBlock
+            {
+                Text = "获取版本列表失败：可能无法连接到 GitHub。",
+                Margin = new Thickness(8),
+                TextWrapping = TextWrapping.Wrap,
+            };
+        }
+
+        if (await closing != ContentDialogResult.Primary || selected is not { } target)
+            return;
+
+        // 回滚后若自动检查仍开启，下次启动会自动下载最新版并在退出时装回 → 静默关闭，仅浮动通知。
+        if (vm.Settings.IsAutoCheckUpdate)
+        {
+            vm.Settings.IsAutoCheckUpdate = false;   // 先写回设置（AppSettings 无 INPC，不依赖绑定时序）
+            AutoUpdateToggle.IsOn = false;            // 显式回填开关 UI（触发 Toggled 会再次存盘，同值无害）
+            SettingsService.Save(vm.Settings);
+            ShowFloatingTipFromOwner("已关闭自动检查更新，避免自动升回最新版本", InfoBarSeverity.Warning);
+        }
+
+        await UpdateService.RunRollbackAsync(vm.Settings, target, ShowFloatingTipFromOwner);
     }
 
     // ────────── 默认选项（PDF 阅读 / 画板书写）──────────

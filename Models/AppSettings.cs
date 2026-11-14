@@ -107,6 +107,10 @@ public class AppSettings
     [JsonPropertyName("timePenGrowMs")]
     public int TimePenGrowMs { get; set; } = 50;
 
+    /// <summary>单墨迹点抬手后不定格：开启时只有 1 个墨迹点的笔画抬笔后继续生长至终宽（画小数点更明显），默认开启。</summary>
+    [JsonPropertyName("singleDotNoFreezeEnabled")]
+    public bool SingleDotNoFreezeEnabled { get; set; } = true;
+
     /// <summary>荧光笔启用压力感应：开启后荧光笔笔画粗细跟随压力大小动态变化（默认关闭 = 等粗）。</summary>
     [JsonPropertyName("highlighterPressureEnabled")]
     public bool HighlighterPressureEnabled { get; set; } = false;
