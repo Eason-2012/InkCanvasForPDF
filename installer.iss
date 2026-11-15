@@ -4,7 +4,7 @@
 #endif
 
 #define MyAppName "InkCanvasForPDF"
-#define MyAppVersion "v1.0.0.6-Beta"
+#define MyAppVersion "v1.0.0.7-Beta"
 #define MyAppPublisher "@Eason-2012"
 #define MyAppURL "https://github.com/Eason-2012/InkCanvasForPDF"
 #define MyAppExeName "InkCanvasForPDF.exe"

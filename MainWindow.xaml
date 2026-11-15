@@ -427,12 +427,8 @@
                               Visibility="{Binding HasPdf, Converter={StaticResource BoolToVisibility}}">
                     <Border Padding="12" HorizontalAlignment="Center" VerticalAlignment="Top">
                         <Grid HorizontalAlignment="Center" VerticalAlignment="Top">
-                            <!-- 整层等比缩放（槽位固定）：DisplayScale = 用户缩放 × 宽度适配 -->
-                            <Grid.LayoutTransform>
-                                <ScaleTransform ScaleX="{Binding DisplayScale}" ScaleY="{Binding DisplayScale}"/>
-                            </Grid.LayoutTransform>
-                            <ItemsControl x:Name="PagesItemsControl" ItemsSource="{Binding Pages}">
-                                <ItemsControl.Resources>
+                            <!-- 页面墨迹表面资源放页面区根 Grid：块模板 → 内层页槽模板两层嵌套都能沿逻辑树找到 -->
+                            <Grid.Resources>
                                     <!-- 页面墨迹表面：仅在页进入可见范围 ±缓冲 时由 ContentControl 挂载，
                                          滚出即销毁 InkCanvas；Strokes 保存在 PageModel，滚回自动重建。 -->
                                     <DataTemplate x:Key="PageSurfaceTemplate">
@@ -496,7 +492,12 @@
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
-                                </ItemsControl.Resources>
+                            </Grid.Resources>
+                            <!-- 整层等比缩放（槽位固定）：DisplayScale = 用户缩放 × 宽度适配 -->
+                            <Grid.LayoutTransform>
+                                <ScaleTransform ScaleX="{Binding DisplayScale}" ScaleY="{Binding DisplayScale}"/>
+                            </Grid.LayoutTransform>
+                            <ItemsControl x:Name="PageBlocksItemsControl" ItemsSource="{Binding PageBlocks}">
                                 <ItemsControl.ItemsPanel>
                                     <ItemsPanelTemplate>
                                         <StackPanel Orientation="Vertical"/>
@@ -504,31 +505,46 @@
                                 </ItemsControl.ItemsPanel>
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <!-- 页槽：宽度 = 页面列宽（撑满可视宽，页面在项内居中）；
-                                             第 0 行 = 页面槽位，第 1 行 = 页间距（12 DIP，随整层缩放一起放大） -->
-                                        <Grid Width="{Binding DataContext.PageColumnWidthBase, RelativeSource={RelativeSource AncestorType=Window}}">
-                                            <Grid.RowDefinitions>
-                                                <RowDefinition Height="Auto"/>
-                                                <RowDefinition Height="12"/>
-                                            </Grid.RowDefinitions>
-                                            <Border Grid.Row="0" HorizontalAlignment="Center"
-                                                    Background="{DynamicResource CardBackgroundBrush}"
-                                                    BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1">
-                                                <!-- 外层 = 旋转后的显示槽位（参与布局/滚动前缀和）；PDF 位图由渲染层按该页旋转角原生旋转，
-                                                     位图尺寸即槽位尺寸，不会再被裁掉两头。
-                                                     墨迹层保持未旋转坐标系，用 RotateTransform 仅做显示旋转（内容尺寸旋转后的包围盒 = 槽位尺寸） -->
-                                                <Grid Width="{Binding Width}" Height="{Binding Height}">
-                                                    <Image Source="{Binding Image}"
-                                                           Width="{Binding Width}"
-                                                           Height="{Binding Height}"
-                                                           Stretch="None"
-                                                           RenderOptions.BitmapScalingMode="{Binding DataContext.IsZooming, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource ZoomScalingMode}}"/>
-                                                    <!-- 墨迹层按需挂载：未挂载时 Content 与 ContentTemplate 均为空 → 不生成 InkCanvas -->
-                                                    <ContentControl Content="{Binding MaterializedContent}"
-                                                                    Style="{StaticResource PageSurfaceHostStyle}"
-                                                                    HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                                </Grid>
-                                            </Border>
+                                        <!-- 块容器：高度固定 = 块内页槽总高（含页间距）；未激活时 Pages=null，
+                                             内层列表不生成任何页槽 → 1 万页时视觉树只保留视口附近约 3 块 -->
+                                        <Grid Height="{Binding HeightBase}"
+                                              Width="{Binding DataContext.PageColumnWidthBase, RelativeSource={RelativeSource AncestorType=Window}}">
+                                            <ItemsControl ItemsSource="{Binding Pages}">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <StackPanel Orientation="Vertical"/>
+                                                    </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <!-- 页槽：第 0 行 = 页面槽位，第 1 行 = 页间距（12 DIP，随整层缩放一起放大） -->
+                                                        <Grid>
+                                                            <Grid.RowDefinitions>
+                                                                <RowDefinition Height="Auto"/>
+                                                                <RowDefinition Height="12"/>
+                                                            </Grid.RowDefinitions>
+                                                            <Border Grid.Row="0" HorizontalAlignment="Center"
+                                                                    Background="{DynamicResource CardBackgroundBrush}"
+                                                                    BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1">
+                                                                <!-- 外层 = 旋转后的显示槽位（参与布局/滚动前缀和）；PDF 位图由渲染层按该页旋转角原生旋转，
+                                                                     位图尺寸即槽位尺寸，不会再被裁掉两头。
+                                                                     墨迹层保持未旋转坐标系，用 RotateTransform 仅做显示旋转（内容尺寸旋转后的包围盒 = 槽位尺寸） -->
+                                                                <Grid Width="{Binding Width}" Height="{Binding Height}">
+                                                                    <Image Source="{Binding Image}"
+                                                                           Width="{Binding Width}"
+                                                                           Height="{Binding Height}"
+                                                                           Stretch="None"
+                                                                           RenderOptions.BitmapScalingMode="{Binding DataContext.IsZooming, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource ZoomScalingMode}}"/>
+                                                                    <!-- 墨迹层按需挂载：未挂载时 Content 与 ContentTemplate 均为空 → 不生成 InkCanvas -->
+                                                                    <ContentControl Content="{Binding MaterializedContent}"
+                                                                                    Style="{StaticResource PageSurfaceHostStyle}"
+                                                                                    HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                                </Grid>
+                                                            </Border>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
                                         </Grid>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>

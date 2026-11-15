@@ -761,8 +761,7 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>跳页：先按模型估算滚到目标页附近生成容器，再用目标页容器的真实布局位置精确对齐页顶
-    /// （借鉴 KillerPDF：用 TransformToVisual 取真实坐标，规避模型高度累加与虚拟化布局的偏差）。</summary>
+    /// <summary>跳页：模型前缀和给出的偏移即准确值（页槽高度固定、块高精确，不依赖容器是否已实例化）。</summary>
     private void ScrollToPage(int page1Based)
     {
         var sv = _pdfScrollViewer;
@@ -772,21 +771,15 @@ public partial class MainWindow : Window
         int target = Math.Clamp(page1Based, 1, _viewModel.TotalPages);
         int targetIndex = target - 1;
 
-        // 第一步：按模型估算滚到目标页附近（等高页面下估算与实际一致，虚拟化随即生成目标页容器）。
         ScrollToOffsetClamped(sv, _viewModel.GetPageVerticalOffset(targetIndex));
 
         Dispatcher.BeginInvoke(() =>
         {
             sv.UpdateLayout();
-
-            // 第二步：容器已生成时用真实布局位置精确对齐页顶（未生成则保留估算位置，不做逐项探测）。
-            if (PagesItemsControl.ItemContainerGenerator.ContainerFromIndex(targetIndex) is FrameworkElement item
-                && sv.Content is FrameworkElement content)
-            {
-                double realTop = item.TransformToVisual(content).Transform(new Point(0, 0)).Y;
-                ScrollToOffsetClamped(sv, realTop);
-                sv.UpdateLayout();
-            }
+            // 布局后偏移可能被滚动范围夹紧（最后一页较矮）：再对齐一次模型偏移
+            double expected = _viewModel.GetPageVerticalOffset(targetIndex);
+            if (Math.Abs(sv.VerticalOffset - expected) > 1)
+                ScrollToOffsetClamped(sv, expected);
 
             if (_viewModel.CurrentPage != target)
                 App.Log("ScrollToPage",

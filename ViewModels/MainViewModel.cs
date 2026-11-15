@@ -39,6 +39,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     private const int OpenReadyTimeoutMs = 15000; // 就绪兜底时限：超时强制撤加载页（渲染失败不卡死）
     private const double ScrollBarAllowance = 18;  // 页面列宽预留的纵向滚动条宽度（DIP）
     private const int MaterializeBufferPages = 1;  // 墨迹画布挂载缓冲：可见范围上下各多挂 1 页（防书写中滚出被断笔）
+    private const int PageBlockSize = 50;          // 页面分块大小：块激活时才实例化块内页槽（1 万页避免一次性建满视觉树）
     /// <summary>缩放倍率：每档固定 ×1.1，保证各倍率下滚轮手感一致。</summary>
     public const double ZoomStepFactor = 1.1;
 
@@ -91,9 +92,14 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     private double _maxPageExtent = 800;                     // 文档内最大页槽位宽（Base DIP），决定页面列宽
     private int _materializedStart = -1;                     // 已挂载墨迹画布的页区间（含缓冲）
     private int _materializedEnd = -1;
+    private int _activeBlockStart = -1;                      // 已激活（块内页槽已实例化）的块区间
+    private int _activeBlockEnd = -1;
 
     public List<PageModel> Pages { get; private set; } = new();
     public List<ThumbnailModel> Thumbnails { get; private set; } = new();
+
+    /// <summary>页面分块（每块 PageBlockSize 页）：外层列表只渲染块，块激活时才实例化块内页槽。</summary>
+    public List<PageBlockModel> PageBlocks { get; private set; } = new();
 
     /// <summary>页面集合整体替换（打开/关闭文档）：宿主据此清理旧画布与笔画追踪。</summary>
     public event Action? PagesReset;
@@ -326,6 +332,8 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         if (!HasPdf || Pages.Count == 0 || _lastViewportHeight <= 0)
             return;
         var (first, last) = GetVisiblePageRange(_lastVerticalOffset, _lastViewportHeight);
+        // 滚动停止后再切换块内页槽：滚动途中反复创建/销毁 50 页会明显掉帧（拖动滚动条时表现为卡顿）
+        UpdateActiveBlocks(first, last);
         // 滚动停止后：补缺失 base；视口内页面（含部分可见）处于放大状态且没有清晰位图的直接补 hi
         // （不再等成为"当前页"）；未放大时 needHi=false 自动走 base，零额外开销。
         LoadPageImages(first, last, needHiInViewport: true);
@@ -867,8 +875,11 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         PagesReset?.Invoke();   // 旧页模型全部作废：宿主清理画布与笔画追踪
         Pages = new();
         Thumbnails = new();
+        PageBlocks = new();
+        _activeBlockStart = _activeBlockEnd = -1;
         OnPropertyChanged(nameof(Pages));
         OnPropertyChanged(nameof(Thumbnails));
+        OnPropertyChanged(nameof(PageBlocks));
         _pageTopDips = Array.Empty<double>();
         _thumbTopDips = Array.Empty<double>();
         _loadedStartIndex = _loadedEndIndex = -1;
@@ -959,11 +970,26 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
             newPages.Add(page);
         }
 
+        // 分块：块高 = 块内页槽总高（Base DIP，含页间距）；未激活时 Pages=null，内层不生成任何页槽
+        var newBlocks = new List<PageBlockModel>((newPages.Count + PageBlockSize - 1) / PageBlockSize);
+        for (int b = 0; b * PageBlockSize < newPages.Count; b++)
+        {
+            int start = b * PageBlockSize;
+            int count = Math.Min(PageBlockSize, newPages.Count - start);
+            double height = 0;
+            for (int i = start; i < start + count; i++)
+                height += newPages[i].Height + PageVerticalMargin;
+            newBlocks.Add(new PageBlockModel { Index = b, HeightBase = height });
+        }
+
         PagesReset?.Invoke();   // 旧页模型全部作废：宿主清理画布与笔画追踪
         Thumbnails = newThumbs;
         Pages = newPages;
+        PageBlocks = newBlocks;
+        _activeBlockStart = _activeBlockEnd = -1;   // 旧块全部销毁：激活区间复位
         OnPropertyChanged(nameof(Thumbnails));
         OnPropertyChanged(nameof(Pages));
+        OnPropertyChanged(nameof(PageBlocks));
 
         _maxPageExtent = maxExtent > 0 ? maxExtent : 800;
         OnPropertyChanged(nameof(PageColumnWidthBase));   // 列宽 = 最大页槽位宽 × 缩放（旋转 90° 也不超宽）
@@ -996,6 +1022,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
             else
             {
                 UpdateMaterializedRange(0, Math.Min(PageBufferSize, Pages.Count - 1));   // 首屏附近先挂墨迹画布
+                UpdateActiveBlocks(0, Math.Min(PageBufferSize, Pages.Count - 1));        // 首屏块实例化页槽
                 LoadPageImages(0, Math.Min(PageBufferSize, Pages.Count - 1), needHiInViewport: false);   // 初始只补 base
             }
         }
@@ -1020,6 +1047,9 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         _lastRangeLast = last;
 
         UpdateMaterializedRange(first, last);   // 只保留可见范围（±缓冲）的墨迹画布
+        // 块内页槽切换只在首屏立即执行；滚动途中交给滚动防抖（避免拖动滚动条时反复建/拆 50 页）
+        if (_activeBlockStart < 0)
+            UpdateActiveBlocks(first, last);
 
         // 当前页 = 视口中占比最大的页（交界处哪页占得多算哪页）。
         int dominant = GetDominantPageIndex(first, last, verticalOffset, viewportHeight);
@@ -1064,6 +1094,60 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
 
         _materializedStart = start;
         _materializedEnd = end;
+    }
+
+    /// <summary>页槽按块懒实例化：只保留可见范围上下各 1 块的页槽，其余块内列表置空（回收视觉树）。
+    /// 1 万页一次性实例化模板页槽会让 UI 线程卡死数十秒，并让静止时合成/布局成本居高不下。</summary>
+    private void UpdateActiveBlocks(int firstVisible, int lastVisible)
+    {
+        if (PageBlocks.Count == 0)
+        {
+            _activeBlockStart = _activeBlockEnd = -1;
+            return;
+        }
+        int start = Math.Max(0, firstVisible / PageBlockSize - 1);
+        int end = Math.Min(PageBlocks.Count - 1, lastVisible / PageBlockSize + 1);
+        if (start == _activeBlockStart && end == _activeBlockEnd)
+            return;
+
+        // 先回收离开区间的块（销毁页槽与墨迹画布），再激活新进入的块
+        if (_activeBlockStart >= 0)
+        {
+            for (int b = _activeBlockStart; b <= _activeBlockEnd; b++)
+                if (b < start || b > end)
+                    PageBlocks[b].Pages = null;
+        }
+        for (int b = start; b <= end; b++)
+        {
+            if (b >= _activeBlockStart && b <= _activeBlockEnd && PageBlocks[b].Pages != null)
+                continue;
+            int from = b * PageBlockSize;
+            int count = Math.Min(PageBlockSize, Pages.Count - from);
+            PageBlocks[b].Pages = Pages.GetRange(from, count);
+        }
+
+        _activeBlockStart = start;
+        _activeBlockEnd = end;
+    }
+
+    /// <summary>重算某页所在块的高度（旋转改变页高后必须同步，块高固定才能保证滚动范围与跳页偏移准确）。</summary>
+    private void UpdateBlockHeight(int pageIndex)
+    {
+        int b = pageIndex / PageBlockSize;
+        if (b < 0 || b >= PageBlocks.Count)
+            return;
+        PageBlocks[b].HeightBase = CalculateBlockHeight(b);
+    }
+
+    /// <summary>页面分块：块内页槽总高之和（Base DIP）。</summary>
+    private double CalculateBlockHeight(int blockIndex)
+    {
+        int from = blockIndex * PageBlockSize;
+        int count = Math.Min(PageBlockSize, Pages.Count - from);
+        double height = 0;
+        for (int i = from; i < from + count; i++)
+            height += Pages[i].Height + PageVerticalMargin;
+        return height;
     }
 
     /// <summary>把页码输入框文本同步为当前页。</summary>
@@ -1206,6 +1290,14 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
             _pageRotations[index] = next;
 
         RebuildPageTopDips();
+        UpdateBlockHeight(index);   // 页高变了 → 所在块高度同步（块高固定才保证滚动范围正确）
+
+        // 旋转可能让该页成为最宽槽位（90°/270° 宽高交换），列宽随最大槽位宽更新
+        double maxExtent = 0;
+        foreach (var p in Pages)
+            maxExtent = Math.Max(maxExtent, p.Width);
+        _maxPageExtent = maxExtent > 0 ? maxExtent : 800;
+        OnPropertyChanged(nameof(PageColumnWidthBase));
 
         // 缩略图同步（仅该页；位图尺寸/方向变化 → 清位图，由调用方按新布局重载）
         if (index < Thumbnails.Count)
