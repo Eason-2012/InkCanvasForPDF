@@ -37,7 +37,8 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     private const int ReleaseIdleMs = 1000;    // 无缩放/滚动空闲多久释放内存
     private const int OpenReadyPollMs = 100;      // 首屏就绪轮询间隔
     private const int OpenReadyTimeoutMs = 15000; // 就绪兜底时限：超时强制撤加载页（渲染失败不卡死）
-    private const double ScrollBarAllowance = 18;  // 页面列宽预留的纵向滚动条宽度（DIP）
+    private const double PageContentPadding = 12;  // 页面区外层 Border Padding（四边各 12 DIP，位于 LayoutTransform 之外、不缩放）
+    private const double PageSlotChrome = 2;       // 页槽 Border 上下边框合计（BorderThickness=1 × 2，参与布局高度）
     private const int MaterializeBufferPages = 1;  // 墨迹画布挂载缓冲：可见范围上下各多挂 1 页（防书写中滚出被断笔）
     private const int PageBlockSize = 50;          // 页面分块大小：块激活时才实例化块内页槽（1 万页避免一次性建满视觉树）
     /// <summary>缩放倍率：每档固定 ×1.1，保证各倍率下滚轮手感一致。</summary>
@@ -276,10 +277,11 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     /// 页面尺寸固定不重建，宽度变化只改 _widthFit → 无占位闪动。</summary>
     public double DisplayScale => _zoomLevel * _widthFit;
 
-    /// <summary>页面列宽（Base DIP，未缩放）：取"视口可用宽反算值"与"最大页槽位宽"的较大者。
-    /// 页槽按此宽度撑满，页面在槽内水平居中；整层 LayoutTransform 缩放后即为可视宽。</summary>
+    /// <summary>页面列宽（Base DIP，未缩放）：视口宽（已排除纵向滚动条）减去外层 Border 左右 Padding 后反算。
+    /// 页槽按此宽度撑满，页面在槽内水平居中；适配视口时内容宽恰等于视口宽（无横向滚动），
+    /// 放大超过视口时才由 _maxPageExtent 撑出横向滚动范围。</summary>
     public double PageColumnWidthBase =>
-        Math.Max((_viewportWidth - ScrollBarAllowance) / Math.Max(0.01, DisplayScale), _maxPageExtent);
+        Math.Max((_viewportWidth - PageContentPadding * 2) / Math.Max(0.01, DisplayScale), _maxPageExtent);
 
     /// <summary>高 DPI 缩放系数（由 MainWindow 注入），用于决定渲染分辨率。</summary>
     public double DpiScale
@@ -978,7 +980,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
             int count = Math.Min(PageBlockSize, newPages.Count - start);
             double height = 0;
             for (int i = start; i < start + count; i++)
-                height += newPages[i].Height + PageVerticalMargin;
+                height += newPages[i].Height + PageSlotChrome + PageVerticalMargin;   // 与页槽实际占用高一致
             newBlocks.Add(new PageBlockModel { Index = b, HeightBase = height });
         }
 
@@ -1146,7 +1148,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         int count = Math.Min(PageBlockSize, Pages.Count - from);
         double height = 0;
         for (int i = from; i < from + count; i++)
-            height += Pages[i].Height + PageVerticalMargin;
+            height += Pages[i].Height + PageSlotChrome + PageVerticalMargin;   // 与页槽实际占用高一致
         return height;
     }
 
@@ -1172,9 +1174,10 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         _highlightedThumbIndex = target;
     }
 
-    /// <summary>页面顶部/底部的缩放后坐标（前缀和 O(1)，整层等比）。</summary>
-    private double ScaledPageTop(int i) => (_pageTopDips[i] + i * PageVerticalMargin) * DisplayScale;
-    private double ScaledPageBottom(int i) => (_pageTopDips[i + 1] + (i + 1) * PageVerticalMargin) * DisplayScale;
+    /// <summary>页面顶部/底部的缩放后坐标：外层 Border Padding 不参与缩放，前缀和本身就是页槽步长累计。
+    /// 坐标必须与实际布局严格一致，否则跳页会偏出页顶、露出上一页尾巴。</summary>
+    private double ScaledPageTop(int i) => PageContentPadding + _pageTopDips[i] * DisplayScale;
+    private double ScaledPageBottom(int i) => PageContentPadding + _pageTopDips[i + 1] * DisplayScale;
 
     private (int First, int Last) GetVisiblePageRange(double verticalOffset, double viewportHeight)
     {
@@ -1258,12 +1261,9 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
 
     public void GoToNextPage() => GoToPage(CurrentPage + 1);
 
-    /// <summary>计算某页（0-based）顶部的垂直偏移，用于跳页滚动（前缀和 O(1)，整层等比）。</summary>
+    /// <summary>计算某页（0-based）顶部的垂直偏移，用于跳页滚动：与实际布局同源（含 Padding、边框、页间距）。</summary>
     public double GetPageVerticalOffset(int pageIndex)
-    {
-        int i = Math.Min(pageIndex, Pages.Count);
-        return (_pageTopDips[i] + i * PageVerticalMargin) * DisplayScale;
-    }
+        => ScaledPageTop(Math.Min(Math.Max(0, pageIndex), Pages.Count));
 
     /// <summary>旋转当前页（±90°，顺时针为正）：页面位图按新方向原生重渲染，显示槽位同步交换；
     /// 墨迹坐标系不变（墨迹层仅显示旋转，不改 ISF）。其他页方向与尺寸不受影响。</summary>
@@ -1340,7 +1340,10 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>重建页面顶部 DIP 前缀和（页面高度 = 当前旋转下的显示槽位高）。</summary>
+    /// <summary>单页在未缩放坐标系占用的总高：页面槽位 + 上下边框 + 页间距（与实际布局严格一致）。</summary>
+    private double PageStride(int i) => Pages[i].Height + PageSlotChrome + PageVerticalMargin;
+
+    /// <summary>重建页面顶部 DIP 前缀和（按页槽步长累计：页面高 + 边框 + 间距）。</summary>
     private void RebuildPageTopDips()
     {
         _pageTopDips = new double[Pages.Count + 1];
@@ -1348,7 +1351,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         for (int i = 0; i < Pages.Count; i++)
         {
             _pageTopDips[i] = acc;
-            acc += Pages[i].Height;
+            acc += PageStride(i);
         }
         _pageTopDips[Pages.Count] = acc;
     }

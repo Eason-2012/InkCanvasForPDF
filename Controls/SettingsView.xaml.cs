@@ -1013,6 +1013,8 @@ public partial class SettingsView : System.Windows.Controls.UserControl
         // 只限制白色卡片高度（模板 BackgroundElement.MaxHeight 走此 DynamicResource，默认 756），
         // 遮罩层不受影响仍铺满全窗；实例 Resources 查找优先于全局主题，不影响其它弹窗。
         dialog.Resources["ContentDialogMaxHeight"] = 500d;
+        // 卡片最小宽度（模板 BackgroundElement.MinWidth 走此 DynamicResource，默认 320）
+        dialog.Resources["ContentDialogMinWidth"] = 400d;
         // 「滚回到此版本」用强调样式，与其它弹窗主按钮一致
         dialog.SetResourceReference(iNKORE.UI.WPF.Modern.Controls.ContentDialog.PrimaryButtonStyleProperty,
             iNKORE.UI.WPF.Modern.ThemeKeys.AccentButtonStyleKey);

@@ -500,16 +500,25 @@ namespace InkCanvasForPDF.Board
                 // WPF 单 manipulator（第一指被 inkCanvas 捕获）时 md.Scale 恒 1：用自跟踪的两指距离算倍率
                 double selfScale = 1.0;
                 double pinch = CurrentBoardPinchDistance();
-                if (pinch > 1)
+                if (pinch >= 40)
                 {
-                    if (_boardPinchDist > 1)
+                    if (_boardPinchDist >= 40)
                         selfScale = pinch / _boardPinchDist;
                     _boardPinchDist = pinch;
                 }
+                else
+                {
+                    _boardPinchDist = 0;   // 双指过近：重建基准，不缩放（防抖）
+                }
+                selfScale = Math.Clamp(selfScale, 0.5, 2.0);   // 单帧倍率钳制
                 double rotate = md.Rotation;   // 获得旋转角度
                 Vector scale = md.Scale;       // 获得缩放倍数
                 if (Math.Abs(scale.X - 1.0) <= 0.005 && Math.Abs(selfScale - 1.0) > 0.005)
                     scale = new Vector(selfScale, selfScale);   // WPF 单 manipulator 兜底：用自算倍率
+
+                // 单帧位移钳制：换指/质心跳变时防画布"飞"
+                double maxStep = Math.Max(inkCanvas.ActualWidth, inkCanvas.ActualHeight) * 0.5;
+                trans = new Vector(Math.Clamp(trans.X, -maxStep, maxStep), Math.Clamp(trans.Y, -maxStep, maxStep));
 
                 Matrix m = new Matrix();
 
@@ -518,8 +527,18 @@ namespace InkCanvasForPDF.Board
 
                 if (Settings.Gesture.IsEnableTwoFingerGestureTranslateOrRotation && e.Source is FrameworkElement fe)
                 {
-                    // Find center of element and then transform to get current location of center
-                    Point center = new Point(fe.ActualWidth / 2, fe.ActualHeight / 2);
+                    Point center;
+                    if (_boardTouchPoints.Count >= 2)
+                    {
+                        // 手势中心 = 两指质心（inkCanvas 坐标，与笔画坐标同系）：戳哪里缩哪里
+                        double cx = 0, cy = 0;
+                        foreach (var p in _boardTouchPoints.Values) { cx += p.X; cy += p.Y; }
+                        center = new Point(cx / _boardTouchPoints.Count, cy / _boardTouchPoints.Count);
+                    }
+                    else
+                    {
+                        center = new Point(fe.ActualWidth / 2, fe.ActualHeight / 2);   // 兜底：画布中心（鼠标/单指）
+                    }
                     center = m.Transform(center);  // 转换为矩阵缩放和旋转的中心点
 
                     if (Settings.Gesture.IsEnableTwoFingerRotation)
