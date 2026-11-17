@@ -16,6 +16,7 @@ public class PageInkCanvas : InkCanvas
         _renderer = new TimePressureDynamicRenderer(Controller);
         DynamicRenderer = _renderer;   // InkCanvas 负责移除旧 DR、把新 DR 追加到 StylusPlugIns 末尾并挂接 RootVisual
         StylusPlugIns.Add(new TimePressurePlugIn(Controller));
+        StylusPlugIns.Add(new InkTracePlugIn(TraceStore));   // 在绘点采集（双指停墨重建用，笔线程）
         // 丢失笔捕获 = 抬笔事件可能没送达：只清"没有抬笔记录"的僵死会话（正常抬笔已记录时刻，不受影响）
         LostStylusCapture += (_, e) =>
         {
@@ -26,4 +27,7 @@ public class PageInkCanvas : InkCanvas
 
     /// <summary>本页的时间笔锋控制器（由 MainWindow 在加载/卸载与选项变化时驱动）。</summary>
     public TimePressureController Controller { get; }
+
+    /// <summary>在绘笔画点采集（双指停墨时重建被 WPF 丢弃的湿墨）。</summary>
+    public InkTraceStore TraceStore { get; } = new();
 }

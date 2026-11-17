@@ -93,11 +93,6 @@ namespace InkCanvasForPDF.Board
             };
             // 在绘点采集：双指停墨保留时用它重建被 WPF 丢弃的湿墨
             _inkTrace = new InkTraceCollector(inkCanvas);
-            // 触点位置跟踪：双指缩放倍率自算（WPF 单 manipulator 时 ManipulationDelta.Scale 恒 1）
-            inkCanvas.AddHandler(UIElement.TouchMoveEvent,
-                new EventHandler<TouchEventArgs>(Board_TouchMoveTrack), true);
-            inkCanvas.AddHandler(UIElement.TouchUpEvent,
-                new EventHandler<TouchEventArgs>(Board_TouchUpTrack), true);
             RefreshTimePressureArmed();
         }
 

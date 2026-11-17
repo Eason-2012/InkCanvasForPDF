@@ -297,8 +297,6 @@ namespace InkCanvasForPDF.Board
         private bool _gestureDiscardPending;           // 本手势要丢弃被中断的那一截（等收笔时删）
         private bool _gestureInkFrozen;                // 双指手势停墨保留中：时间笔锋武装必须保持（否则 AbortStroke 清掉湿墨）
         private InkTraceCollector? _inkTrace;          // 在绘点采集（停墨保留重建用）
-        private readonly Dictionary<int, Point> _boardTouchPoints = new();   // 活动触点位置（自算缩放倍率用）
-        private double _boardPinchDist;      // 上一帧两指距离（WPF 单 manipulator 时 md.Scale 恒 1）
 
         /// <summary>双指手势成立时回滚橡皮批处理（CodeInput 门，不入撤销历史）：橡皮 + 双指缩放不留擦除痕迹。</summary>
         private void RevertEraseBatchForGesture()
@@ -349,10 +347,8 @@ namespace InkCanvasForPDF.Board
         private void inkCanvas_PreviewTouchDown(object sender, TouchEventArgs e)
         {
             dec.Add(e.TouchDevice.Id);
-            _boardTouchPoints[e.TouchDevice.Id] = e.GetTouchPoint(inkCanvas).Position;   // 自算缩放倍率的触点跟踪
             if (dec.Count == 1)
                 _boardFirstTouchDownMs = Environment.TickCount64;   // 第一指落笔时刻 = 在绘笔画最早点时刻
-            _boardPinchDist = 0;   // 换指：下一帧重建两指距离基准
             //设备1个的时候，记录中心点
             if (dec.Count == 1)
             {
@@ -419,13 +415,9 @@ namespace InkCanvasForPDF.Board
                 }
             }
             dec.Remove(e.TouchDevice.Id);
-            _boardTouchPoints.Remove(e.TouchDevice.Id);
             inkCanvas.Opacity = 1;
             if (dec.Count == 0)
-            {
                 _gestureInkFrozen = false;   // 手势结束：武装交回正常门控（下方恢复 EditingMode 会重新武装）
-                _boardPinchDist = 0;
-            }
             if (dec.Count == 0 && _eraseGestureBatchGuard)
             {
                 _eraseGestureBatchGuard = false;
@@ -450,7 +442,6 @@ namespace InkCanvasForPDF.Board
         }
         private void inkCanvas_ManipulationStarting(object sender, ManipulationStartingEventArgs e)
         {
-            _boardPinchDist = 0;
             e.Mode = ManipulationModes.All;
         }
 
@@ -459,30 +450,8 @@ namespace InkCanvasForPDF.Board
 
         }
 
-        /// <summary>当前两指距离（画板坐标）；不足两指返回 0。WPF 单 manipulator 时 md.Scale 恒 1，缩放倍率须自算。</summary>
-        private double CurrentBoardPinchDistance()
-        {
-            if (_boardTouchPoints.Count < 2)
-                return 0;
-            Point a = default, b = default;
-            int i = 0;
-            foreach (var p in _boardTouchPoints.Values)
-            {
-                if (i++ == 0) a = p;
-                else { b = p; break; }
-            }
-            return (a - b).Length;
-        }
-
-        private void Board_TouchMoveTrack(object? sender, TouchEventArgs e)
-            => _boardTouchPoints[e.TouchDevice.Id] = e.GetTouchPoint(inkCanvas).Position;
-
-        private void Board_TouchUpTrack(object? sender, TouchEventArgs e)
-            => _boardTouchPoints.Remove(e.TouchDevice.Id);
-
         private void Main_Grid_ManipulationCompleted(object sender, ManipulationCompletedEventArgs e)
         {
-            _boardPinchDist = 0;
             if (e.Manipulators.Count() == 0)
             {
                 if (forceEraser) return;
@@ -497,28 +466,8 @@ namespace InkCanvasForPDF.Board
             {
                 ManipulationDelta md = e.DeltaManipulation;
                 Vector trans = md.Translation;  // 获得位移矢量
-                // WPF 单 manipulator（第一指被 inkCanvas 捕获）时 md.Scale 恒 1：用自跟踪的两指距离算倍率
-                double selfScale = 1.0;
-                double pinch = CurrentBoardPinchDistance();
-                if (pinch >= 40)
-                {
-                    if (_boardPinchDist >= 40)
-                        selfScale = pinch / _boardPinchDist;
-                    _boardPinchDist = pinch;
-                }
-                else
-                {
-                    _boardPinchDist = 0;   // 双指过近：重建基准，不缩放（防抖）
-                }
-                selfScale = Math.Clamp(selfScale, 0.5, 2.0);   // 单帧倍率钳制
-                double rotate = md.Rotation;   // 获得旋转角度
-                Vector scale = md.Scale;       // 获得缩放倍数
-                if (Math.Abs(scale.X - 1.0) <= 0.005 && Math.Abs(selfScale - 1.0) > 0.005)
-                    scale = new Vector(selfScale, selfScale);   // WPF 单 manipulator 兜底：用自算倍率
-
-                // 单帧位移钳制：换指/质心跳变时防画布"飞"
-                double maxStep = Math.Max(inkCanvas.ActualWidth, inkCanvas.ActualHeight) * 0.5;
-                trans = new Vector(Math.Clamp(trans.X, -maxStep, maxStep), Math.Clamp(trans.Y, -maxStep, maxStep));
+                double rotate = md.Rotation;    // 获得旋转角度
+                Vector scale = md.Scale;        // 获得缩放倍数
 
                 Matrix m = new Matrix();
 
@@ -527,18 +476,8 @@ namespace InkCanvasForPDF.Board
 
                 if (Settings.Gesture.IsEnableTwoFingerGestureTranslateOrRotation && e.Source is FrameworkElement fe)
                 {
-                    Point center;
-                    if (_boardTouchPoints.Count >= 2)
-                    {
-                        // 手势中心 = 两指质心（inkCanvas 坐标，与笔画坐标同系）：戳哪里缩哪里
-                        double cx = 0, cy = 0;
-                        foreach (var p in _boardTouchPoints.Values) { cx += p.X; cy += p.Y; }
-                        center = new Point(cx / _boardTouchPoints.Count, cy / _boardTouchPoints.Count);
-                    }
-                    else
-                    {
-                        center = new Point(fe.ActualWidth / 2, fe.ActualHeight / 2);   // 兜底：画布中心（鼠标/单指）
-                    }
+                    // 缩放/旋转中心 = 当前手势原点（两指质心，inkCanvas 坐标）：戳哪里缩哪里
+                    Point center = e.ManipulationOrigin;
                     center = m.Transform(center);  // 转换为矩阵缩放和旋转的中心点
 
                     if (Settings.Gesture.IsEnableTwoFingerRotation)

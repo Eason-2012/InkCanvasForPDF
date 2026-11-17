@@ -38,11 +38,7 @@ public partial class MainWindow : Window
     private readonly Dictionary<int, Point> _pdfTouchPoints = new();   // 活动手指在 PagesScrollViewer 坐标系的位置（算实时质心）
     private bool _pdfTouchSetChanged;   // 本帧手指集合发生变化（加/抬指）→ 跳过一帧，防质心/平移量突变跳视图
     private bool _pdfPanAllowed;        // 本手势已由本类接管平移（供惯性判定；手指全抬后计数已清零，必须另存）
-    private double _pdfPinchDist;        // 上一帧两指距离（自算缩放倍率；WPF 单 manipulator 时 Scale 恒 1）
-    private double _pdfCumScale = 1.0;   // 本手势累计缩放（自算，手势类型锁存用）
-    private const double PinchMinDistance = 40;    // 双指距离低于此值（DIP）不缩放：近距离比值噪声大，会抖/爆
-    private const double PinchMaxFrameScale = 2.0; // 单帧缩放倍率上限（下限取倒数）
-    // 触摸入口委托（挂到页面画布上：挂在 ScrollViewer 上实测收不到事件）
+    // 触摸入口委托（Down 挂页面画布；Move/Up 另挂外层视口）
     private EventHandler<TouchEventArgs>? _pdfTouchDownHandler;
     private EventHandler<TouchEventArgs>? _pdfTouchMoveHandler;
     private EventHandler<TouchEventArgs>? _pdfTouchUpHandler;
@@ -54,7 +50,6 @@ public partial class MainWindow : Window
     private long _pdfFirstTouchDownMs;                       // 第一指落笔时刻（Environment.TickCount64，0=无）
     private bool _pdfGestureKeepStroke;                       // 本次手势是否保留被中断笔画
     private readonly Dictionary<InkCanvas, bool> _gestureKeepPending = new();   // 该画布待保留的那一笔尚未提交
-    private readonly Dictionary<InkCanvas, InkTraceCollector> _inkTraceCollectors = new();   // 在绘点采集（停墨保留重建用）
     private bool _pendingInkRestore;          // 手势结束后的恢复已排队（防重复调度）
     private bool _wasHidden;          // 窗口曾最小化：恢复前台时用多帧 Opacity 遮罩掩盖位图纹理重传白闪
     private EventHandler? _restoreFrameHandler;   // 多帧遮罩的渲染帧订阅
@@ -1052,30 +1047,10 @@ public partial class MainWindow : Window
         if (!IsPdfGestureAllowed)
             return;
 
-        // WPF 单 manipulator（第一指被 InkCanvas 捕获）时 Scale 恒 1：用手跟踪的两指距离算本帧倍率
-        double selfScale = 1.0;
-        double pinchDist = CurrentPinchDistance();
-        if (pinchDist >= PinchMinDistance)
-        {
-            if (_pdfPinchDist >= PinchMinDistance)
-            {
-                selfScale = pinchDist / _pdfPinchDist;
-                selfScale = Math.Clamp(selfScale, 1.0 / PinchMaxFrameScale, PinchMaxFrameScale);   // 单帧倍率钳制：防两指抖动放大成"爆炸"
-            }
-            _pdfPinchDist = pinchDist;
-        }
-        else
-        {
-            _pdfPinchDist = 0;   // 小于门槛：重建基准，避免下一帧突变
-        }
-        _pdfCumScale = Math.Clamp(_pdfCumScale * selfScale, 0.2, 5.0);
-
         // 手势锁存判定（累计量，非单帧增量）
         if (_touchGesture == TouchGestureKind.Undecided)
         {
             double cumScale = e.CumulativeManipulation.Scale.X;
-            if (Math.Abs(cumScale - 1.0) < 0.001)
-                cumScale = _pdfCumScale;   // WPF 没给有效 Scale：用自算累计
             System.Windows.Vector cumTranslation = e.CumulativeManipulation.Translation;
             if (Math.Abs(cumScale - 1.0) >= 0.03)
                 _touchGesture = TouchGestureKind.Zoom;
@@ -1088,18 +1063,11 @@ public partial class MainWindow : Window
         if (sv == null)
         {
             if (_touchGesture == TouchGestureKind.Zoom)
-            {
-                double noSvScale = e.DeltaManipulation.Scale.X;
-                if (Math.Abs(noSvScale - 1.0) <= 0.005)
-                    noSvScale = selfScale;   // WPF 无效 → 自算
-                _viewModel.ZoomBy(noSvScale);   // 无 ScrollViewer：只改缩放，不平移
-            }
+                _viewModel.ZoomBy(e.DeltaManipulation.Scale.X);   // 无 ScrollViewer：只改缩放，不平移
             return;
         }
 
         System.Windows.Vector t = e.DeltaManipulation.Translation;
-        double maxStep = Math.Max(sv.ViewportWidth, sv.ViewportHeight) * 0.5;
-        t = new System.Windows.Vector(Math.Clamp(t.X, -maxStep, maxStep), Math.Clamp(t.Y, -maxStep, maxStep));   // 换指/质心跳变时防视图"飞"
         double oldOffsetX = PagesScrollViewer.HorizontalOffset;   // 布局未变时读取（ZoomBy 只改 ZoomLevel，不动 offset）
         double oldOffsetY = sv.VerticalOffset;
 
@@ -1107,8 +1075,6 @@ public partial class MainWindow : Window
         if (_touchGesture == TouchGestureKind.Zoom)
         {
             double scale = e.DeltaManipulation.Scale.X;
-            if (Math.Abs(scale - 1.0) <= 0.005)
-                scale = selfScale;   // WPF 无效（单 manipulator）→ 用自算
             if (Math.Abs(scale - 1.0) > 0.005)
             {
                 _isTouchZooming = true;
@@ -1176,23 +1142,6 @@ public partial class MainWindow : Window
         return new System.Windows.Point(sx / _pdfTouchPoints.Count, sy / _pdfTouchPoints.Count);
     }
 
-    /// <summary>当前两指距离（PagesScrollViewer 视口坐标，DIP）；不足两指返回 0。
-    /// WPF 的 Manipulation 在批注模式下只拿到一个 manipulator（第一指被 InkCanvas 捕获），
-    /// Scale 恒 1，缩放倍率必须用自己跟踪的触点算。</summary>
-    private double CurrentPinchDistance()
-    {
-        if (_pdfTouchPoints.Count < 2)
-            return 0;
-        Point a = default, b = default;
-        int i = 0;
-        foreach (var p in _pdfTouchPoints.Values)
-        {
-            if (i++ == 0) a = p;
-            else { b = p; break; }
-        }
-        return (a - b).Length;
-    }
-
     /// <summary>第二指落下：非鼠标状态（笔/橡皮/形状/无选区的选择）停墨，让双指走本类接管的平移 + 捏合缩放。
     /// 选区遮罩可见时不抑制——双指继续变换选区（ICA 语义）。</summary>
     private void PdfView_PreviewTouchDown(object? sender, TouchEventArgs e)
@@ -1204,15 +1153,7 @@ public partial class MainWindow : Window
         if (!_pdfActiveTouchIds.Add(e.TouchDevice.Id))
             return;   // 同一设备重复 Down（防重复计数导致首指时刻不更新）
         if (_pdfActiveTouchIds.Count == 1)
-        {
             _pdfFirstTouchDownMs = Environment.TickCount64;   // 第一指落笔时刻 = 在绘笔画最早点时刻（保留判定用）
-            _pdfPinchDist = 0;
-            _pdfCumScale = 1.0;
-        }
-        else
-        {
-            _pdfPinchDist = 0;   // 换指：下一帧 Delta 重建两指距离基准
-        }
         _pdfTouchPoints[e.TouchDevice.Id] = e.TouchDevice.GetTouchPoint(PagesScrollViewer).Position;   // 位置跟踪：缩放锚点取实时质心
         _pdfTouchSetChanged = true;   // 换指帧：本帧不应用平移/缩放，防质心/平移量突变跳视图
         if (_viewModel.InkTool.IsMultiFingerInk)
@@ -1262,7 +1203,7 @@ public partial class MainWindow : Window
             bool wasInk = canvas.EditingMode == InkCanvasEditingMode.Ink;   // 切 None 后就丢了原模式，先记
             // 采集点必须在切 None 之前取出：切模式会触发整套输入收尾，事后取点可能已被清空
             IReadOnlyList<StylusPoint> keptPoints = Array.Empty<StylusPoint>();
-            bool hasTrace = _inkTraceCollectors.TryGetValue(canvas, out var trace) && trace.TryTake(out keptPoints);
+            bool hasTrace = canvas is PageInkCanvas traceCanvas && traceCanvas.TraceStore.TryTake(out keptPoints);
             if (!_suppressedStrokeBase.ContainsKey(canvas))
                 _suppressedStrokeBase[canvas] = strokesBefore;   // 基线只记一次：恢复时删掉手势期间新增的全部笔画
             _suppressedEditingBindings[canvas] = binding.ParentBinding;
@@ -1270,6 +1211,7 @@ public partial class MainWindow : Window
                 _gestureKeepPending[canvas] = true;   // 必须在切 None 之前登记：提交可能发生在切换瞬间，守卫要消费它
             BindingOperations.ClearBinding(canvas, modeProperty);
             canvas.EditingMode = InkCanvasEditingMode.None;
+            canvas.ReleaseAllTouchCaptures();   // 第一指交还 ScrollViewer：否则 Manipulation 只有 1 个 manipulator，Scale 恒 1 → 只能平移
             // 第 1 指落下时 InkCanvas 已开始一笔；切 None 时 WPF 会丢弃在绘湿墨（多数情况下直接丢，抬笔也不再提交）→
             // 不处理就整笔消失。这里把本次输入新增的笔画移除（CodeInput 门：不写撤销历史；
             // PageStrokes_StrokesChanged 的笔画级订阅/_strokePage 簿记仍随事件正常回收）。
@@ -1340,8 +1282,6 @@ public partial class MainWindow : Window
         if (_pdfActiveTouchIds.Count != 0)
             return;
         _pdfFirstTouchDownMs = 0;   // 全部抬指：下一笔重新计时
-        _pdfPinchDist = 0;
-        _pdfCumScale = 1.0;
         // 抬笔丢失兜底：所有手指已抬起，仍有未收笔会话则按最后一点补收笔（防僵尸湿墨/整笔丢失）。
         // 与手势抑制无关，始终执行；延迟到 Background，等原生笔画与抬笔处理先完成。
         foreach (var pageCanvas in _pageInkCanvases)
@@ -1382,8 +1322,12 @@ public partial class MainWindow : Window
         }
 
         bool keepRequested = _pdfGestureKeepStroke;
+        // 上一轮 Restore 若被新手指打断过，基线可能残留：全部抬指后重新开始，先清再记
+        if (_suppressedStrokeBase.Count > 0 && _suppressedEditingBindings.Count == 0)
+            _suppressedStrokeBase.Clear();
         var prev = _currentCommitType;
         _currentCommitType = CommitReason.CodeInput;
+        int removedPages = 0;
         try
         {
             foreach (var (canvas, baseline) in _suppressedStrokeBase)
@@ -1395,6 +1339,7 @@ public partial class MainWindow : Window
                 for (int i = removeFrom; i < canvas.Strokes.Count; i++)
                     extra.Add(canvas.Strokes[i]);
                 canvas.Strokes.Remove(extra);
+                removedPages++;
             }
         }
         finally
@@ -1405,15 +1350,12 @@ public partial class MainWindow : Window
 
         // 保留模式下仍有未消费标记 = InkCanvas 没把被中断的那一笔提交出来（墨迹已丢，与改动前一致）。
         // 仅控制台诊断，便于日后按日志决定是否补"追踪器点集重建"回退。
-        if (keepRequested)
-        {
-            int stillPending = 0;
-            foreach (var pending in _gestureKeepPending.Values)
-                if (pending)
-                    stillPending++;
-            if (stillPending > 0)
-                ConsoleLog.Write("PDF双指手势", $"停墨保留未生效: 画布={stillPending}, 笔画已提交=False");
-        }
+        int stillPending = 0;
+        foreach (var pending in _gestureKeepPending.Values)
+            if (pending)
+                stillPending++;
+        if (keepRequested || stillPending > 0)
+            ConsoleLog.Write("PDF双指手势", $"恢复: 保留={keepRequested}, 删除页数={removedPages}, 未提交={stillPending}");
         _gestureKeepPending.Clear();
         _pdfGestureKeepStroke = false;
 
@@ -1710,10 +1652,7 @@ public partial class MainWindow : Window
                     TryPauseRecognizeProvisionalPdfAsync(pageCanvasForPause, deviceId, pending));
         }
 
-        // 在绘点采集：双指手势保留时用它重建被 WPF 丢弃的湿墨（Loaded 可多次触发，先释放旧的）
-        if (_inkTraceCollectors.Remove(inkCanvas, out var oldTrace))
-            oldTrace.Dispose();
-        _inkTraceCollectors[inkCanvas] = new InkTraceCollector(inkCanvas);
+        // 在绘点采集挂在 PageInkCanvas 的笔线程插件上（TraceStore），此处无需再创建 UI 层采集器
     }
 
     /// <summary>停顿强制识别触发门（PDF 宿主）：画笔工具、非荧光笔、非形状模式、内建墨迹模式。
@@ -1832,9 +1771,6 @@ public partial class MainWindow : Window
         // 停顿强制识别追踪器随页面释放（新文档重建容器时防定时器与事件订阅泄漏）
         if (_pauseTrackers.Remove(pageCanvas, out var tracker))
             tracker.Dispose();
-        // 在绘点采集器随页面释放
-        if (_inkTraceCollectors.Remove(pageCanvas, out var trace))
-            trace.Dispose();
         // 双指手势触摸入口随页面摘除
         if (_pdfTouchDownHandler != null)
         {
@@ -1856,8 +1792,6 @@ public partial class MainWindow : Window
         {
             _pdfTouchPoints.Clear();
             _pdfFirstTouchDownMs = 0;
-            _pdfPinchDist = 0;
-            _pdfCumScale = 1.0;
         }
     }
 
