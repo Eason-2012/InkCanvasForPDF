@@ -600,12 +600,13 @@ namespace InkCanvasForPDF.Board
             RefreshTimePressureArmed();
         }
 
-        private bool _singleDotNoFreezeEnabled = true;
+        /// <summary>墨迹过短关闭笔锋阈值（px，主设置 shortInkLengthPx；由 MainWindow 注入）。</summary>
+        public double ShortInkLengthPx { get; set; } = 1.0;
 
-        /// <summary>单墨迹点抬手后不定格（主设置 singleDotNoFreezeEnabled；由 MainWindow 注入）。</summary>
-        public void ApplySingleDotNoFreezeEnabled(bool enabled)
+        /// <summary>注入阈值并即时同步控制器（MainWindow 在启动与设置变更时调用）。</summary>
+        public void ApplyShortInkLength(double px)
         {
-            _singleDotNoFreezeEnabled = enabled;
+            ShortInkLengthPx = px;
             RefreshTimePressureArmed();
         }
 

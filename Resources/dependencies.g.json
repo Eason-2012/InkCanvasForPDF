@@ -124,6 +124,28 @@
     "LicenseInformationOrigin": 5
   },
   {
+    "PackageId": "NAudio.Core",
+    "PackageVersion": "3.3.0",
+    "PackageProjectUrl": "https://naudio.github.io/NAudio/",
+    "Copyright": "\u00A9 Mark Heath 2026",
+    "Authors": "Mark Heath",
+    "Description": "Core audio types, wave format and provider interfaces, sample providers, file readers/writers, DSP, and resampling for the NAudio audio library.",
+    "License": "MIT",
+    "LicenseUrl": "https://licenses.nuget.org/MIT",
+    "LicenseInformationOrigin": 0
+  },
+  {
+    "PackageId": "NAudio.Wasapi",
+    "PackageVersion": "3.3.0",
+    "PackageProjectUrl": "https://naudio.github.io/NAudio/",
+    "Copyright": "\u00A9 Mark Heath 2026",
+    "Authors": "Mark Heath",
+    "Description": "WASAPI playback and capture (including loopback and process loopback) and Media Foundation codecs for the NAudio audio library. Windows-only at runtime.",
+    "License": "MIT",
+    "LicenseUrl": "https://licenses.nuget.org/MIT",
+    "LicenseInformationOrigin": 0
+  },
+  {
     "PackageId": "Sage.MarkdownRenderer",
     "PackageVersion": "1.0.0.10",
     "PackageProjectUrl": "https://gitcode.com/liupenglai/Sage",
@@ -181,6 +203,17 @@
     "Copyright": "\u00A9 Microsoft Corporation. All rights reserved.",
     "Authors": "Microsoft",
     "Description": "Provides non-cryptographic hash algorithms, such as CRC-32.\n\nCommonly Used Types:\nSystem.IO.Hashing.Crc32\nSystem.IO.Hashing.XxHash32",
+    "License": "MIT",
+    "LicenseUrl": "https://licenses.nuget.org/MIT",
+    "LicenseInformationOrigin": 0
+  },
+  {
+    "PackageId": "System.Numerics.Tensors",
+    "PackageVersion": "9.0.0",
+    "PackageProjectUrl": "https://dot.net/",
+    "Copyright": "\u00A9 Microsoft Corporation. All rights reserved.",
+    "Authors": "Microsoft",
+    "Description": "Provides support for operating over tensors.",
     "License": "MIT",
     "LicenseUrl": "https://licenses.nuget.org/MIT",
     "LicenseInformationOrigin": 0

@@ -295,6 +295,7 @@ namespace InkCanvasForPDF.Board
         private const long StrokeKeepMinAgeMs = 100;   // 同 PDF 侧规则：最早点 ≥100ms 才保留
         private long _boardFirstTouchDownMs;           // 第一指落笔时刻（Environment.TickCount64，0=无）
         private bool _gestureDiscardPending;           // 本手势要丢弃被中断的那一截（等收笔时删）
+        private bool _gestureKeepErase;                // 本次双指手势是否保留已擦内容（橡皮 ≥100ms）
         private bool _gestureInkFrozen;                // 双指手势停墨保留中：时间笔锋武装必须保持（否则 AbortStroke 清掉湿墨）
         private InkTraceCollector? _inkTrace;          // 在绘点采集（停墨保留重建用）
 
@@ -399,7 +400,16 @@ namespace InkCanvasForPDF.Board
                 if (dec.Count >= 2 && forceEraser)
                 {
                     _eraseGestureBatchGuard = true;
-                    RevertEraseBatchForGesture();                                  // 回滚本触摸已擦内容
+                    // 橡皮：≥100ms 的擦除落账保留；<100ms 仍回滚（双指缩放不留痕）
+                    long age = _boardFirstTouchDownMs == 0 ? -1 : Environment.TickCount64 - _boardFirstTouchDownMs;
+                    _gestureKeepErase = age >= StrokeKeepMinAgeMs;
+                    int replacedCount = ReplacedStroke?.Count ?? 0;
+                    int addedCount = AddedStroke?.Count ?? 0;
+                    if (_gestureKeepErase)
+                        FlushEraseBatch();              // 已擦部分提交为一条擦除历史（保留）
+                    else
+                        RevertEraseBatchForGesture();   // 原行为：不留痕
+                    ConsoleLog.Write("画板双指手势", $"橡皮: 保留={_gestureKeepErase}, 首指距今={age}ms, 原笔={replacedCount}, 片段={addedCount}");
                 }
             }
         }
@@ -421,7 +431,10 @@ namespace InkCanvasForPDF.Board
             if (dec.Count == 0 && _eraseGestureBatchGuard)
             {
                 _eraseGestureBatchGuard = false;
-                RevertEraseBatchForGesture();   // 兜底：回滚手势期间漏网的擦除（Preview 先于冒泡 MouseUp，提交时批处理已空）
+                RevertEraseBatchForGesture();   // 保留擦除时累加器已被 Flush 清空 → 空操作；否则兜底回滚
+                if (_gestureKeepErase)
+                    ConsoleLog.Write("画板双指手势", "橡皮手势结束: 保留=True");
+                _gestureKeepErase = false;
                 inkCanvas.EraserShape = forcePointEraser
                     ? new RectangleStylusShape(EraserDiameter, InkCircleCursor.EraserBoardHeight(EraserDiameter))
                     : new EllipseStylusShape(5, 5);   // 恢复真实橡皮形状（同 Main_Grid_TouchDown 公式）

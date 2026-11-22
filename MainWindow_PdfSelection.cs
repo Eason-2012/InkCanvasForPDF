@@ -75,6 +75,7 @@ public partial class MainWindow
             stroke.DrawingAttributes.Width = _selectionInkCanvas.DefaultDrawingAttributes.Width;
             stroke.DrawingAttributes.Height = _selectionInkCanvas.DefaultDrawingAttributes.Height;
         }
+        CommitDrawingAttributesHistoryIfAny();   // 属性改完立即入撤销（粗细 +/- 同款）
     }
 
     private void BorderStrokeSelectionDelete_Click(object sender, RoutedEventArgs e)
@@ -93,46 +94,109 @@ public partial class MainWindow
     {
         if (_selectionInkCanvas == null) return;
         StrokeCollection selectedStrokes = _selectionInkCanvas.GetSelectedStrokes();
+        if (selectedStrokes.Count == 0) return;
 
-        if (selectedStrokes.Count > 0)
+        // 始终带选区背景：选区下方的 PDF 内容 + 选中墨迹；位图/尺寸不可用时回退为纯墨迹（透明背景）
+        BitmapSource output = _selectionInkCanvas.DataContext is Models.PageModel page
+                              && page.Image is BitmapSource pageBitmap
+                              && page.Width > 0 && page.Height > 0
+                              && page.ContentWidth > 0 && page.ContentHeight > 0
+            ? RenderSelectionOnPageBackground(pageBitmap, selectedStrokes, page)
+            : RenderSelectionInkOnly(selectedStrokes);
+
+        SaveFileDialog saveFileDialog = new SaveFileDialog();
+        saveFileDialog.Filter = "PNG Images|*.png";
+        saveFileDialog.Title = "Save Selected Ink as PNG";
+        saveFileDialog.FileName = DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss-fff");
+
+        if (saveFileDialog.ShowDialog() == true)
         {
-            Rect bounds = selectedStrokes.GetBounds();
+            PngBitmapEncoder encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(output));
 
-            double width = bounds.Width + 10;
-            double height = bounds.Height + 10;
-            RenderTargetBitmap renderTarget = new RenderTargetBitmap(
-                (int)Math.Ceiling(width), (int)Math.Ceiling(height),
-                96, 96, PixelFormats.Pbgra32);
-
-            DrawingVisual drawingVisual = new DrawingVisual();
-            using (DrawingContext drawingContext = drawingVisual.RenderOpen())
+            using (FileStream fileStream = new FileStream(saveFileDialog.FileName, FileMode.Create))
             {
-                drawingContext.PushTransform(new TranslateTransform(-bounds.X, -bounds.Y));
-
-                foreach (Stroke stroke in selectedStrokes)
-                {
-                    stroke.Draw(drawingContext);
-                }
-            }
-
-            renderTarget.Render(drawingVisual);
-
-            SaveFileDialog saveFileDialog = new SaveFileDialog();
-            saveFileDialog.Filter = "PNG Images|*.png";
-            saveFileDialog.Title = "Save Selected Ink as PNG";
-            saveFileDialog.FileName = DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss-fff");
-
-            if (saveFileDialog.ShowDialog() == true)
-            {
-                PngBitmapEncoder encoder = new PngBitmapEncoder();
-                encoder.Frames.Add(BitmapFrame.Create(renderTarget));
-
-                using (FileStream fileStream = new FileStream(saveFileDialog.FileName, FileMode.Create))
-                {
-                    encoder.Save(fileStream);
-                }
+                encoder.Save(fileStream);
             }
         }
+    }
+
+    /// <summary>纯墨迹导出（无 PDF 背景可用时的回退）：选中笔画包围盒 + 10 DIP 留白，透明背景。</summary>
+    private static BitmapSource RenderSelectionInkOnly(StrokeCollection selectedStrokes)
+    {
+        Rect bounds = selectedStrokes.GetBounds();
+        double width = bounds.Width + 10;
+        double height = bounds.Height + 10;
+        RenderTargetBitmap renderTarget = new RenderTargetBitmap(
+            (int)Math.Ceiling(width), (int)Math.Ceiling(height),
+            96, 96, PixelFormats.Pbgra32);
+
+        DrawingVisual drawingVisual = new DrawingVisual();
+        using (DrawingContext drawingContext = drawingVisual.RenderOpen())
+        {
+            drawingContext.PushTransform(new TranslateTransform(-bounds.X, -bounds.Y));
+            foreach (Stroke stroke in selectedStrokes)
+            {
+                stroke.Draw(drawingContext);
+            }
+        }
+
+        renderTarget.Render(drawingVisual);
+        renderTarget.Freeze();
+        return renderTarget;
+    }
+
+    /// <summary>选区 + PDF 背景导出：整页复合（PrintService 同款，墨迹按内容 DIP→像素缩放 + 按页旋转）后按选区裁剪。
+    /// 包围盒是未旋转内容坐标；位图像素 = 显示槽位 DIP × 渲染倍率，倍率 r = bmp.PixelWidth / page.Width。</summary>
+    private static BitmapSource RenderSelectionOnPageBackground(
+        BitmapSource pageBitmap, StrokeCollection strokes, Models.PageModel page)
+    {
+        const double padding = 10;
+        Rect b = strokes.GetBounds();
+        double x0 = Math.Max(0, b.X - padding), y0 = Math.Max(0, b.Y - padding);
+        double x1 = Math.Min(page.ContentWidth, b.Right + padding), y1 = Math.Min(page.ContentHeight, b.Bottom + padding);
+        if (x1 <= x0 || y1 <= y0)
+        {
+            x0 = b.X; y0 = b.Y; x1 = b.Right; y1 = b.Bottom;
+        }
+        if (x1 <= x0 || y1 <= y0)
+            return RenderSelectionInkOnly(strokes);
+
+        BitmapSource full = Services.PrintService.CompositePageWithInk(pageBitmap, new List<Stroke>(strokes),
+            page.ContentWidth, page.ContentHeight, page.ContentWidth, page.ContentHeight, page.Rotation);
+
+        double r = pageBitmap.PixelWidth / (double)Math.Max(1, page.Width);   // 两轴同倍率（烘焙 DPI 保证）
+        int Wp = full.PixelWidth, Hp = full.PixelHeight;
+        int cx, cy, cw, ch;
+        switch (page.Rotation)
+        {
+            case 90:   // 顺时针：内容 (x,y) → (UH-y, x)
+                cx = Px(Wp - y1 * r); cy = Px(x0 * r);
+                cw = Px((y1 - y0) * r); ch = Px((x1 - x0) * r);
+                break;
+            case 180:  // (x,y) → (UW-x, UH-y)
+                cx = Px(Wp - x1 * r); cy = Px(Hp - y1 * r);
+                cw = Px((x1 - x0) * r); ch = Px((y1 - y0) * r);
+                break;
+            case 270:  // (x,y) → (y, UW-x)
+                cx = Px(y0 * r); cy = Px(Hp - x1 * r);
+                cw = Px((y1 - y0) * r); ch = Px((x1 - x0) * r);
+                break;
+            default:
+                cx = Px(x0 * r); cy = Px(y0 * r);
+                cw = Px((x1 - x0) * r); ch = Px((y1 - y0) * r);
+                break;
+        }
+        cx = Math.Clamp(cx, 0, Math.Max(0, Wp - 1));
+        cy = Math.Clamp(cy, 0, Math.Max(0, Hp - 1));
+        cw = Math.Clamp(cw, 1, Wp - cx);
+        ch = Math.Clamp(ch, 1, Hp - cy);
+
+        var crop = new CroppedBitmap(full, new Int32Rect(cx, cy, cw, ch));
+        crop.Freeze();
+        return crop;
+
+        static int Px(double v) => (int)Math.Round(v);
     }
 
     private void ChangeSelectedStrokeThickness(double multipler)
@@ -637,6 +701,8 @@ public partial class MainWindow
         var key = sender as Stroke;
         if (key == null) return;
         if (_strokePage.TryGetValue(key, out var attrPage)) MarkPdfDirty(attrPage);   // 改色/粗细不走 StrokesChanged，不标就丢（D3）
+        if (_currentCommitType == CommitReason.CodeInput)
+            return;   // 回放门：撤销/重做应用属性时不记新历史（否则会把"撤销"本身记成一步）
         // 克隆手势中的克隆笔画不记属性历史：撤销语义 = 整体删除克隆，不单步回退
         if (StrokesSelectionClone.Count != 0 && StrokesSelectionClone.Contains(key)) return;
         var currentValue = key.DrawingAttributes.Clone();
@@ -684,6 +750,11 @@ public partial class MainWindow
     {
         if (!(sender is Stroke stroke)) return;
         if (_strokePage.TryGetValue(stroke, out var dragPage)) MarkPdfDirty(dragPage);   // 选中拖移/变换改点集，不走 StrokesChanged（D3）
+        if (_currentCommitType == CommitReason.CodeInput)
+        {
+            StrokeInitialHistory[stroke] = stroke.StylusPoints.Clone();   // 回放：只跟基线，不记 Manipulation
+            return;
+        }
         // 克隆笔画的拖移不进 Manipulation 累加器（逐帧 Transform 会刷屏提交，盖住"新增克隆"条目）；
         // 基线跟上当前位置，避免手势结束后首次移动该克隆撤销回退到拖前位置
         if (StrokesSelectionClone.Count != 0 && StrokesSelectionClone.Contains(stroke))

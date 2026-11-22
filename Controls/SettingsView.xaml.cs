@@ -32,8 +32,8 @@ public partial class SettingsView : System.Windows.Controls.UserControl
     /// <summary>「荧光笔启用压力感应」切换时触发（由 MainWindow 同步 PDF 页面控制器与画板）。</summary>
     public event Action<bool>? HighlighterPressureChanged;
 
-    /// <summary>「单墨迹点抬手后不定格」切换时触发（由 MainWindow 同步 PDF 页面控制器与画板）。</summary>
-    public event Action<bool>? SingleDotNoFreezeChanged;
+    /// <summary>「墨迹过短关闭笔锋」修改时触发（由 MainWindow 同步 PDF 页面控制器与画板）。</summary>
+    public event Action<double>? ShortInkLengthChanged;
 
     /// <summary>「启用中国传统毛笔墨迹样式」切换时触发（由 MainWindow 同步画板笔尖，PDF 侧走 InkTool 即时生效）。</summary>
     public event Action<bool>? BrushInkStyleChanged;
@@ -59,7 +59,7 @@ public partial class SettingsView : System.Windows.Controls.UserControl
     };
 
     /// <summary>荧光笔色下拉 6 档（索引 101~106）。</summary>
-    private static readonly string[] DefaultHighlighterColorNames = { "红", "橙", "黄", "青", "蓝", "紫" };
+    private static readonly string[] DefaultHighlighterColorNames = { "红", "橙", "黄", "青", "蓝", "粉" };
 
     /// <summary>PDF 墨迹栏 / 黑板墨迹栏布局设置（缩放/边距/背景色）变更时触发（由 MainWindow 应用并转发 BoardView）。</summary>
     public event Action? BarLayoutChanged;
@@ -81,7 +81,7 @@ public partial class SettingsView : System.Windows.Controls.UserControl
         UpdateService.ProgressChanged += () => ApplyUpdateState();
         Loaded += (_, _) =>
         {
-            // 默认选中"墨迹书写"导航项；若实际未触发选中，也强制落到墨迹书写页。
+            // 默认选中"基本选项"导航项；若实际未触发选中，也强制落到基本选项页。
             SelectDefaultItem();
             if (DataContext is MainViewModel vm)
             {
@@ -91,6 +91,8 @@ public partial class SettingsView : System.Windows.Controls.UserControl
                 vm.InkTool.FitToCurve = vm.Settings.IsFitToCurve;
                 // 已保存的时间笔锋长满时间回填输入框（TextChanged 幂等回写同值）。
                 TimePenGrowMsBox.Text = vm.Settings.TimePenGrowMs.ToString();
+                // 已保存的墨迹过短阈值回填输入框（TextChanged 幂等回写同值）。
+                ShortInkLengthBox.Text = vm.Settings.ShortInkLengthPx.ToString();
                 // 已保存的笔锋样式回填下拉框，并按样式决定"时间笔锋长满时间"卡片可见性。
                 ComboBoxPenStyle.SelectedIndex = Math.Max(0, Array.IndexOf(PenStyleMap, Math.Clamp(vm.Settings.InkStyle, 0, 3)));
                 UpdateTimePenCardVisibility();
@@ -190,7 +192,7 @@ public partial class SettingsView : System.Windows.Controls.UserControl
             App.LogText("FloatingTip 不可用（无 MainWindow 宿主）：" + message);
     }
 
-    /// <summary>默认选中"墨迹书写"导航项（首个 MenuItem），并把右侧内容切到墨迹书写页。</summary>
+    /// <summary>默认选中"基本选项"导航项（首个 MenuItem），并把右侧内容切到基本选项页。</summary>
     private void SelectDefaultItem()
     {
         if (SettingsNav.SelectedItem == null && SettingsNav.MenuItems.Count > 0)
@@ -215,13 +217,14 @@ public partial class SettingsView : System.Windows.Controls.UserControl
         ShowSection(item.Tag as string ?? "writing");
     }
 
-    /// <summary>依导航选择切换右侧设置区（writing=墨迹书写，appearance=应用主题，pdfbar=PDF阅读，boardbar=画板书写，inkrecog=墨迹识别，about=关于应用）。</summary>
+    /// <summary>依导航选择切换右侧设置区（writing=基本选项，appearance=应用主题，pdfbar=PDF阅读，boardbar=画板书写，inkstyle=墨迹样式，inkrecog=墨迹识别，about=关于应用）。</summary>
     private void ShowSection(string tag)
     {
         WritingSection.Visibility = tag == "writing" ? Visibility.Visible : Visibility.Collapsed;
         AppearanceSection.Visibility = tag == "appearance" ? Visibility.Visible : Visibility.Collapsed;
         PdfBarSection.Visibility = tag == "pdfbar" ? Visibility.Visible : Visibility.Collapsed;
         BoardBarSection.Visibility = tag == "boardbar" ? Visibility.Visible : Visibility.Collapsed;
+        InkStyleSection.Visibility = tag == "inkstyle" ? Visibility.Visible : Visibility.Collapsed;
         InkRecognitionSection.Visibility = tag == "inkrecog" ? Visibility.Visible : Visibility.Collapsed;
         PalmEraseSection.Visibility = tag == "palmerase" ? Visibility.Visible : Visibility.Collapsed;
         DataStorageSection.Visibility = tag == "datastorage" ? Visibility.Visible : Visibility.Collapsed;
@@ -238,7 +241,7 @@ public partial class SettingsView : System.Windows.Controls.UserControl
             Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
     }
 
-    /// <summary>第三方代码参考：读取编译进程序集的 Resources\dependencies.g.json，
+    /// <summary>第三方代码参考：读取输出目录 Resources 下的 dependencies.g.json，
     /// 以「库名 + 链接」列表在 iuwm ContentDialog 中展示（格式对齐旧项目 AboutView）。</summary>
     private async void ThirdPartyDeps_Click(object sender, RoutedEventArgs e)
     {
@@ -306,7 +309,7 @@ public partial class SettingsView : System.Windows.Controls.UserControl
         return linkBlock;
     }
 
-    /// <summary>读取编译进程序集的第三方依赖清单，按显示名排序；缺资源/解析失败记日志并返回空表。</summary>
+    /// <summary>读取输出目录 Resources 下的第三方依赖清单，按显示名排序；缺文件/解析失败记日志并返回空表。</summary>
     private static List<(string Name, string Url)> LoadDependencyInfos()
     {
         // 取首个存在的字符串字段（JSON null 视同缺失继续找下一个）
@@ -320,9 +323,10 @@ public partial class SettingsView : System.Windows.Controls.UserControl
 
         try
         {
-            var uri = new Uri("pack://application:,,,/Resources/dependencies.g.json");
-            using var stream = Application.GetResourceStream(uri)!.Stream;
-            using var reader = new StreamReader(stream);
+            var path = Path.Combine(AppContext.BaseDirectory, "Resources", "dependencies.g.json");
+            if (!File.Exists(path))
+                return new List<(string Name, string Url)>();
+            using var reader = new StreamReader(path);
             // 容忍尾随逗号，防止清单被工具再次生成出尾随逗号时解析失败
             var opts = new JsonDocumentOptions { AllowTrailingCommas = true };
             if (JsonNode.Parse(reader.ReadToEnd(), documentOptions: opts) is not JsonArray arr)
@@ -420,12 +424,27 @@ public partial class SettingsView : System.Windows.Controls.UserControl
         SettingsService.Save(vm.Settings);
     }
 
-    private void SingleDotNoFreezeToggle_Toggled(object sender, RoutedEventArgs e)
+    /// <summary>墨迹过短关闭笔锋：留空或 0 = 关闭；其余解析并钳制 0~50px 后写回设置、存盘并通知 MainWindow 同步控制器。</summary>
+    private void ShortInkLengthBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (Vm is not { } vm)
             return;
-        SingleDotNoFreezeChanged?.Invoke(vm.Settings.SingleDotNoFreezeEnabled);   // 同步 PDF 与画板即时生效
+        string text = ShortInkLengthBox.Text.Trim();
+        double px;
+        if (text.Length == 0)
+        {
+            px = 0;   // 留空 = 关闭补长
+        }
+        else if (!double.TryParse(text, out px))
+        {
+            return;   // 中途输入（负号/字母等）不处理，保留上次有效值
+        }
+        px = Math.Clamp(px, 0, 50);
+        if (Math.Abs(vm.Settings.ShortInkLengthPx - px) < 1e-9)
+            return;   // 回填或同值：不重复存盘
+        vm.Settings.ShortInkLengthPx = px;
         SettingsService.Save(vm.Settings);
+        ShortInkLengthChanged?.Invoke(px);
     }
 
     private void BrushInkStyleToggle_Toggled(object sender, RoutedEventArgs e)
@@ -490,12 +509,12 @@ public partial class SettingsView : System.Windows.Controls.UserControl
         SettingsService.Save(vm.Settings);
     }
 
-    /// <summary>时间笔锋专属卡片（长满时间、单墨迹点抬手后不定格）仅当笔锋样式 = 时间笔锋（3）时显示。</summary>
+    /// <summary>时间笔锋专属卡片（长满时间、墨迹过短关闭笔锋）仅当笔锋样式 = 时间笔锋（3）时显示。</summary>
     private void UpdateTimePenCardVisibility()
     {
         var visibility = (Vm?.Settings.InkStyle == 3) ? Visibility.Visible : Visibility.Collapsed;
         TimePenGrowMsCard.Visibility = visibility;
-        SingleDotNoFreezeCard.Visibility = visibility;
+        ShortInkLengthCard.Visibility = visibility;
     }
 
     /// <summary>时间笔锋长满时间输入：解析并钳制 10~1000ms 后写回设置、存盘并通知 MainWindow 同步控制器。</summary>
@@ -784,6 +803,23 @@ public partial class SettingsView : System.Windows.Controls.UserControl
         {
             App.Log("数据存储", ex);
         }
+    }
+
+    /// <summary>彩蛋：全校师生通透人生 → 系统音量拉满后跳转 B 站。</summary>
+    private void EnjoyLife_Click(object sender, RoutedEventArgs e)
+        => OpenEggWithFullVolume("https://www.bilibili.com/video/BV1ExpA6aE3U/");
+
+    /// <summary>彩蛋：学校食堂宣传片 → 系统音量拉满后跳转 B 站。</summary>
+    private void CanteenVideo_Click(object sender, RoutedEventArgs e)
+        => OpenEggWithFullVolume("https://www.bilibili.com/video/BV1ho4y1878K/");
+
+    /// <summary>彩蛋共用流程：系统主音量调 100%（成功才播报通知，失败静默记日志）→ 打开链接 → 播报跳转通知。</summary>
+    private void OpenEggWithFullVolume(string url)
+    {
+        if (SystemVolumeService.SetMaxVolume())
+            ShowFloatingTipFromOwner("已调节系统环境，获得最佳体验😜", InfoBarSeverity.Success);
+        Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        ShowFloatingTipFromOwner("正在跳转哔哩哔哩", InfoBarSeverity.Success);
     }
 
     // ═══════════ 应用更新（状态区 + 检查/下载/安装流程 + 更新日志）═══════════

@@ -105,7 +105,7 @@ namespace InkCanvasForPDF.Board
             c.PressureEnabled = _pressureEnabled;
             c.GrowMs = TimePenGrowMs;
             c.HighlighterPressureEnabled = _highlighterPressureEnabled;
-            c.SingleDotNoFreezeEnabled = _singleDotNoFreezeEnabled;
+            c.ShortInkLengthPx = ShortInkLengthPx;
             // 书写模式 = 画笔工具 + 非形状手绘；橡皮/选择/形状一律视为非书写，时间笔锋整体不介入
             bool penMode = !forceEraser && drawingShapeMode == 0;
             bool inkMode = penMode && (isInMultiTouchMode
@@ -388,6 +388,16 @@ namespace InkCanvasForPDF.Board
                 }));
         }
 
+        /// <summary>提交并复位擦除批处理（累加器非空时提交为一条撤销历史）。触摸抬笔与双指手势保留擦除共用。</summary>
+        private void FlushEraseBatch()
+        {
+            if (ReplacedStroke == null && AddedStroke == null)
+                return;
+            timeMachine.CommitStrokeEraseHistory(ReplacedStroke, AddedStroke);
+            AddedStroke = null;
+            ReplacedStroke = null;
+        }
+
         private void inkCanvas_MouseUp(object sender, MouseButtonEventArgs e)
         {
             if (_boardShapeFinishPending) return;   // 触摸路径已排队，交给 Background 回调完成
@@ -395,12 +405,8 @@ namespace InkCanvasForPDF.Board
             ShapeDrawing_MouseUp();
 
             // 面积擦提交并复位（ICA L1590-1595）：累加器必须在此清空，否则下次擦除撞“重复的笔画”
-            if (!_eraseGestureBatchGuard && ReplacedStroke != null)
-            {
-                timeMachine.CommitStrokeEraseHistory(ReplacedStroke, AddedStroke);
-                AddedStroke = null;
-                ReplacedStroke = null;
-            }
+            if (!_eraseGestureBatchGuard)
+                FlushEraseBatch();
 
             // 选择/移动笔迹提交（ICA L1615-1623）
             if (StrokeManipulationHistory?.Count > 0)

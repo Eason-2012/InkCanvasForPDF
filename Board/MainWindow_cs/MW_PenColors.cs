@@ -165,28 +165,28 @@ namespace InkCanvasForPDF.Board
             }
 
             if (inkColor == 101)
-            { // Highlighter Red
-                inkCanvas.DefaultDrawingAttributes.Color = Color.FromRgb(220, 38, 38);
+            { // Highlighter Red（亮系红）
+                inkCanvas.DefaultDrawingAttributes.Color = Color.FromRgb(255, 18, 0);
             }
             else if (inkColor == 102)
-            { // Highlighter Orange
-                inkCanvas.DefaultDrawingAttributes.Color = Color.FromRgb(234, 88, 12);
+            { // Highlighter Orange（亮系橙）
+                inkCanvas.DefaultDrawingAttributes.Color = Color.FromRgb(249, 115, 22);
             }
             else if (inkColor == 103)
-            { // Highlighter Yellow
-                inkCanvas.DefaultDrawingAttributes.Color = Color.FromRgb(234, 179, 8);
+            { // Highlighter Yellow（亮系黄）
+                inkCanvas.DefaultDrawingAttributes.Color = Color.FromRgb(250, 204, 21);
             }
             else if (inkColor == 104)
-            { // Highlighter Teal
-                inkCanvas.DefaultDrawingAttributes.Color = Color.FromRgb(13, 148, 136);
+            { // Highlighter Teal（亮系青，17号线标志色）
+                inkCanvas.DefaultDrawingAttributes.Color = Color.FromRgb(53, 189, 189);
             }
             else if (inkColor == 105)
-            { // Highlighter Blue
-                inkCanvas.DefaultDrawingAttributes.Color = Color.FromRgb(37, 99, 235);
+            { // Highlighter Blue（亮系蓝）
+                inkCanvas.DefaultDrawingAttributes.Color = Color.FromRgb(21, 167, 212);
             }
             else if (inkColor == 106)
-            { // Highlighter Purple
-                inkCanvas.DefaultDrawingAttributes.Color = Color.FromRgb(147, 51, 234);
+            { // Highlighter Pink（亮系粉顶替紫位，昌平线标志色）
+                inkCanvas.DefaultDrawingAttributes.Color = Color.FromRgb(250, 97, 174);
             }
             else if (isUselightThemeColor)
             {
@@ -435,6 +435,16 @@ namespace InkCanvasForPDF.Board
                 foreach (Stroke stroke in strokes)
                 {
                     stroke.DrawingAttributes.Color = targetedColor;
+                }
+                // 选区改色立即入撤销（非选区分支由 ColorSwitchCheck 提交）
+                if (DrawingAttributesHistory.Count > 0)
+                {
+                    timeMachine.CommitStrokeDrawingAttributesHistory(DrawingAttributesHistory);
+                    DrawingAttributesHistory = new Dictionary<Stroke, Tuple<DrawingAttributes, DrawingAttributes>>();
+                    foreach (var item in DrawingAttributesHistoryFlag)
+                    {
+                        item.Value.Clear();
+                    }
                 }
             }
             else

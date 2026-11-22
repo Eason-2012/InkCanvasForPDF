@@ -79,6 +79,16 @@ namespace InkCanvasForPDF.Board
                 stroke.DrawingAttributes.Width = inkCanvas.DefaultDrawingAttributes.Width;
                 stroke.DrawingAttributes.Height = inkCanvas.DefaultDrawingAttributes.Height;
             }
+            // 属性改完立即入撤销（与 ChangeSelectedStrokeThickness 同款）
+            if (DrawingAttributesHistory.Count > 0)
+            {
+                timeMachine.CommitStrokeDrawingAttributesHistory(DrawingAttributesHistory);
+                DrawingAttributesHistory = new Dictionary<Stroke, Tuple<DrawingAttributes, DrawingAttributes>>();
+                foreach (var item in DrawingAttributesHistoryFlag)
+                {
+                    item.Value.Clear();
+                }
+            }
         }
 
         private void BorderStrokeSelectionDelete_Click(object sender, RoutedEventArgs e)

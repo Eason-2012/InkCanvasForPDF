@@ -12,6 +12,7 @@ public sealed class InkTraceStore
 {
     private readonly object _sync = new();
     private readonly List<StylusPoint> _points = new();
+    private readonly HashSet<(double X, double Y, float P)> _received = new();   // 已接受的点（判重：帧内历史回放点会重复）
     private int _deviceId = -1;
 
     /// <summary>当前是否有在绘输入（点集非空）。</summary>
@@ -28,6 +29,7 @@ public sealed class InkTraceStore
             bool had = _deviceId != -1 && _points.Count > 0;
             points = _points.ToArray();
             _points.Clear();
+            _received.Clear();
             _deviceId = -1;
             return had;
         }
@@ -41,8 +43,8 @@ public sealed class InkTraceStore
                 return;   // 已有在绘输入（第二指及后续不采）
             _deviceId = deviceId;
             _points.Clear();
-            if (pts != null)
-                _points.AddRange(pts);
+            _received.Clear();
+            AddBatch(pts);
         }
     }
 
@@ -50,9 +52,9 @@ public sealed class InkTraceStore
     {
         lock (_sync)
         {
-            if (_deviceId == -1 || deviceId != _deviceId || pts == null)
+            if (_deviceId == -1 || deviceId != _deviceId)
                 return;
-            _points.AddRange(pts);
+            AddBatch(pts);
         }
     }
 
@@ -63,8 +65,37 @@ public sealed class InkTraceStore
             if (deviceId != _deviceId)
                 return;
             _points.Clear();
+            _received.Clear();
             _deviceId = -1;
         }
+    }
+
+    /// <summary>批内逆序检测 + 逐点判重（同 TimePressureInk.AppendSamples）：
+    /// 触摸提升的批可能"最新在前"，直接追加会让折线往回走；帧内历史回放点重复追加会折返——两者都是重建笔画的"刺"。</summary>
+    private void AddBatch(StylusPointCollection? pts)
+    {
+        if (pts == null || pts.Count == 0)
+            return;
+        bool reverse = false;
+        if (_points.Count > 0 && pts.Count >= 2)
+        {
+            var tail = _points[^1];
+            reverse = Dist(pts[0], tail) > Dist(pts[pts.Count - 1], tail);
+        }
+        for (int i = 0; i < pts.Count; i++)
+        {
+            var p = pts[reverse ? pts.Count - 1 - i : i];
+            if (!_received.Add((p.X, p.Y, p.PressureFactor)))
+                continue;
+            _points.Add(p);
+        }
+    }
+
+    private static double Dist(StylusPoint a, StylusPoint b)
+    {
+        double dx = a.X - b.X;
+        double dy = a.Y - b.Y;
+        return System.Math.Sqrt(dx * dx + dy * dy);
     }
 }
 

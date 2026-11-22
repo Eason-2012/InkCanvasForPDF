@@ -209,14 +209,15 @@ public sealed class InkToolViewModel : ViewModelBase
         [8] = Color.FromRgb(234, 88, 12)          // 橙
     };
 
+    // 荧光笔色（固定亮系色，不随软/硬笔亮暗切换；紫位用亮系粉顶替）
     private static readonly Dictionary<int, Color> HighlighterColorMap = new()
     {
-        [101] = Color.FromRgb(255, 94, 83),    // 红
-        [102] = Color.FromRgb(255, 112, 13),   // 橙
-        [103] = Color.FromRgb(255, 211, 8),    // 黄
-        [104] = Color.FromRgb(16, 186, 171),   // 青
-        [105] = Color.FromRgb(74, 118, 255),   // 蓝
-        [106] = Color.FromRgb(147, 51, 234)    // 紫
+        [101] = Color.FromRgb(255, 18, 0),      // 红（亮系红）
+        [102] = Color.FromRgb(249, 115, 22),    // 橙（亮系橙）
+        [103] = Color.FromRgb(250, 204, 21),    // 黄（亮系黄）
+        [104] = Color.FromRgb(53, 189, 189),    // 青（亮系青，17号线标志色）
+        [105] = Color.FromRgb(21, 167, 212),    // 蓝（亮系蓝）
+        [106] = Color.FromRgb(250, 97, 174)     // 粉（顶替紫位，昌平线标志色）
     };
 
     private int _inkColor = 1;   // 默认红（对齐 ICA inkColor 默认）

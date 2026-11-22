@@ -38,17 +38,24 @@ public partial class MainWindow : Window
     private readonly Dictionary<int, Point> _pdfTouchPoints = new();   // 活动手指在 PagesScrollViewer 坐标系的位置（算实时质心）
     private bool _pdfTouchSetChanged;   // 本帧手指集合发生变化（加/抬指）→ 跳过一帧，防质心/平移量突变跳视图
     private bool _pdfPanAllowed;        // 本手势已由本类接管平移（供惯性判定；手指全抬后计数已清零，必须另存）
+    // 批注模式的缩放用触点距离自算：停墨切 None 后 WPF Manipulation 只剩 1 个 manipulator，Scale 恒 1
+    private double _pdfPinchDist;        // 上一帧两指距离（0 = 需重建基准）
+    private double _pdfCumScale = 1.0;   // 本手势累计缩放（手势锁存用）
+    private int _pinchLogTick;           // 缩放诊断日志限流（每 20 帧一条）
+    private const double PinchFrameClamp = 2.0;   // 单帧倍率安全网（下限取倒数），只拦异常帧
     // 触摸入口委托（Down 挂页面画布；Move/Up 另挂外层视口）
     private EventHandler<TouchEventArgs>? _pdfTouchDownHandler;
     private EventHandler<TouchEventArgs>? _pdfTouchMoveHandler;
     private EventHandler<TouchEventArgs>? _pdfTouchUpHandler;
     private const double PanInertiaDeceleration = 0.00096;   // 双指平移甩动惯性减速度（DIP/ms²，WPF 惯例值 10×96/1e6：约 1 DIP/ms 初速 ~1s 停下）
     private readonly Dictionary<InkCanvas, Binding> _suppressedEditingBindings = new();   // 抑制前保存的 EditingMode 绑定（恢复时接回）
+    private readonly Dictionary<InkCanvas, InkCanvasEditingMode> _suppressedEditingModes = new();   // 无绑定时的原模式（恢复用）
     private readonly Dictionary<InkCanvas, int> _suppressedStrokeBase = new();   // 手势抑制开始时的笔画基线（恢复时删掉之后新增的）
     // 停墨保留规则：被中断的那一笔最早点已存在 ≥100ms → 收笔保留；否则按原逻辑丢弃
     private const long StrokeKeepMinAgeMs = 100;
     private long _pdfFirstTouchDownMs;                       // 第一指落笔时刻（Environment.TickCount64，0=无）
     private bool _pdfGestureKeepStroke;                       // 本次手势是否保留被中断笔画
+    private bool _pdfGestureKeepErase;                        // 本次手势是否保留已擦内容（橡皮 ≥100ms）
     private readonly Dictionary<InkCanvas, bool> _gestureKeepPending = new();   // 该画布待保留的那一笔尚未提交
     private bool _pendingInkRestore;          // 手势结束后的恢复已排队（防重复调度）
     private bool _wasHidden;          // 窗口曾最小化：恢复前台时用多帧 Opacity 遮罩掩盖位图纹理重传白闪
@@ -75,6 +82,10 @@ public partial class MainWindow : Window
     private readonly HashSet<InkCanvas> _pageInkCanvases = new();                          // 页面画布（切橡皮时统一设置 EraserShape，保证黑板擦指针首显；HashSet 防 Loaded 重复登记，O(1) 查找）
     private readonly HashSet<InkCanvas> _palmEraseCanvases = new();                          // 正在做手掌擦除的页面画布（面积擦历史需走平铺累加器，抬手统一恢复绑定）
     private double _palmEraseScreenSize;                                                     // 手掌擦除洞的屏幕 DIP 宽（0 = 未在手掌擦除；光标与洞等大）
+    // 多指书写自绘模式下的手掌手动擦除：设备 → 画布（不改 EditingMode，避免打断其他手指的时间笔锋会话）
+    private readonly Dictionary<int, InkCanvas> _palmManualEraseDevices = new();
+    private readonly Dictionary<int, Point> _palmManualEraseLastPoint = new();               // 该设备上一个擦除采样点（插值用）
+    private readonly Dictionary<int, InkCanvas> _palmNativeEraseDevices = new();              // 原生 EraseByPoint 手掌擦除：设备 → 画布
     private readonly Dictionary<InkCanvas, PauseInkToShapeTracker> _pauseTrackers = new();   // 停顿强制识别追踪器（每页画布一个；Unloaded 时释放）
     private readonly Dictionary<PageInkCanvas, Action<Stroke, int>> _selfDrawHandlers = new();   // 时间笔锋自绘笔画提交处理程序（Unloaded 时退订）
     // 多指书写全自绘：这些页画布的 EditingMode 被临时摘绑并置 None（原生命中管线关闭），
@@ -143,12 +154,12 @@ public partial class MainWindow : Window
             Board.ApplyHighlighterPressureEnabled(enabled);
         };
         Board.ApplyHighlighterPressureEnabled(_viewModel.Settings.HighlighterPressureEnabled);   // 启动即同步一次
-        SettingsView.SingleDotNoFreezeChanged += enabled =>           // 单墨迹点抬手后不定格即时同步 PDF 与画板
+        SettingsView.ShortInkLengthChanged += _ =>   // 墨迹过短关闭笔锋即时同步 PDF 页面控制器与画板
         {
             RefreshTimePressureArmed();
-            Board.ApplySingleDotNoFreezeEnabled(enabled);
+            Board.ApplyShortInkLength(_viewModel.Settings.ShortInkLengthPx);
         };
-        Board.ApplySingleDotNoFreezeEnabled(_viewModel.Settings.SingleDotNoFreezeEnabled);   // 启动即同步一次
+        Board.ApplyShortInkLength(_viewModel.Settings.ShortInkLengthPx);   // 启动即同步一次
         SettingsView.BrushInkStyleChanged += enabled =>            // 毛笔墨迹样式即时同步画板笔尖
             Board.ApplyBrushInkStyle(enabled);
         Board.ApplyBrushInkStyle(_viewModel.Settings.BrushInkStyleEnabled);   // 启动即同步一次
@@ -205,14 +216,17 @@ public partial class MainWindow : Window
         // 直改条目 TargetStrokes——发生页的笔画集合实例；首尾设置/还原 CodeInput 门）
         _viewModel.InkTool.ApplyHistoryToCanvas = item =>
         {
+            var prevCommitType = _currentCommitType;
             _currentCommitType = CommitReason.CodeInput;
             try
             {
+                // 注意：Manipulation / DrawingAttributes 条目不设 TargetStrokes（按笔画反查页集合），
+                // 判空只能在真正用 strokes 的三个分支内做，不能放在分支之前。
                 var strokes = item.TargetStrokes;
-                if (strokes == null)
-                    return;
                 if (item.CommitType == TimeMachineHistoryType.UserInput)
                 {
+                    if (strokes == null)
+                        return;
                     if (!item.StrokeHasBeenCleared)
                     {
                         foreach (var s in item.CurrentStroke)
@@ -226,6 +240,8 @@ public partial class MainWindow : Window
                 }
                 else if (item.CommitType == TimeMachineHistoryType.Clear)
                 {
+                    if (strokes == null)
+                        return;
                     if (!item.StrokeHasBeenCleared)
                     {
                         // 撤销面积擦：加回原笔（ReplacedStroke）、移除拆分（CurrentStroke）
@@ -249,6 +265,8 @@ public partial class MainWindow : Window
                 }
                 else if (item.CommitType == TimeMachineHistoryType.ShapeRecognition)
                 {
+                    if (strokes == null)
+                        return;
                     // 墨迹纠正（画板 ApplyHistoryToCanvas 同名分支等价）：撤销=移除生成图形、加回手绘；重做反向
                     if (item.StrokeHasBeenCleared)
                     {
@@ -297,7 +315,7 @@ public partial class MainWindow : Window
             }
             finally
             {
-                _currentCommitType = CommitReason.UserInput;
+                _currentCommitType = prevCommitType;
             }
         };
         _viewModel.RequestScrollToOffset = offset =>
@@ -371,8 +389,9 @@ public partial class MainWindow : Window
         _pdfTouchDownHandler = new EventHandler<TouchEventArgs>(PdfView_PreviewTouchDown);
         _pdfTouchMoveHandler = new EventHandler<TouchEventArgs>(PdfView_PreviewTouchMove);
         _pdfTouchUpHandler = new EventHandler<TouchEventArgs>(PdfView_PreviewTouchUp);
-        // 位置跟踪/抬指清理仍挂外层视口：浏览模式页面画布不可命中（IsHitTestVisible=false），
-        // 触摸只到 ScrollViewer；Down（计数+停墨）挂页面画布（见 InkCanvas_Loaded）。
+        // Move/Up 挂祖先 ScrollViewer：切 None 释放触摸捕获后触摸归属会变，
+        // 只有祖先的隧道事件在任何归属下都能收到（页画布在捕获转移后收不到 Move → 距离不更新 → 缩放失效）。
+        // Down 挂页面画布（见 InkCanvas_Loaded）：停墨入口需要元素级可靠触发。
         PagesScrollViewer.AddHandler(UIElement.PreviewTouchMoveEvent, _pdfTouchMoveHandler, true);
         PagesScrollViewer.AddHandler(UIElement.PreviewTouchUpEvent, _pdfTouchUpHandler, true);
         // 暂停触摸透明光标接管（TouchCursorHider）：先恢复默认光标，待问题修复后取消注释。
@@ -445,8 +464,10 @@ public partial class MainWindow : Window
                 else
                 {
                     ClearPdfSelection();
+                    // 与画板一致：页面画布不参与 Manipulation，双指统一由 ScrollViewer 处理。
+                    // 画布一旦 IsManipulationEnabled=true 会抢走 Manipulation 归属，ScrollViewer 只剩单 manipulator → Scale 恒 1（只能平移）。
                     foreach (var pageCanvas in _pageInkCanvases)
-                        pageCanvas.IsManipulationEnabled = true;
+                        pageCanvas.IsManipulationEnabled = false;
                     PagesScrollViewer.IsManipulationEnabled = true;
                     SyncPageEditingModes();   // 退出选择确定性离开 Select（不依赖绑定时序）
                 }
@@ -1128,6 +1149,16 @@ public partial class MainWindow : Window
         !_viewModel.InkTool.IsInkMode
         || (!_viewModel.InkTool.IsMultiFingerInk && _pdfActiveTouchIds.Count >= 2);
 
+    /// <summary>双指手势诊断日志开关：排查问题时 true，正式运行可置 false（零开销）。
+    /// 每轮手势固定 2~3 行；正常单指书写不打日志。</summary>
+    private const bool GestureLogEnabled = true;
+
+    private static void GestureLog(string message)
+    {
+        if (GestureLogEnabled)
+            ConsoleLog.Write("PDF双指手势", message);
+    }
+
     /// <summary>当前活动手指的实时质心（PagesScrollViewer 视口坐标，缩放锚点用）；无跟踪点时返回 null。</summary>
     private System.Windows.Point? CurrentTouchCentroid()
     {
@@ -1142,46 +1173,140 @@ public partial class MainWindow : Window
         return new System.Windows.Point(sx / _pdfTouchPoints.Count, sy / _pdfTouchPoints.Count);
     }
 
+    /// <summary>当前两指距离（PagesScrollViewer 视口坐标，DIP）；不足两指返回 0。</summary>
+    private double CurrentPinchDistance()
+    {
+        if (_pdfTouchPoints.Count < 2)
+            return 0;
+        Point a = default, b = default;
+        int i = 0;
+        foreach (var p in _pdfTouchPoints.Values)
+        {
+            if (i++ == 0) a = p;
+            else { b = p; break; }
+        }
+        return (a - b).Length;
+    }
+
+    /// <summary>批注模式下用触点距离驱动缩放：停墨切 None 后第一指仍归属 InkCanvas 的 ManipulationDevice，
+    /// ScrollViewer 的 ManipulationDelta 只有 1 个 manipulator，Scale 恒 1；这里按触摸采样率逐帧应用。
+    /// 浏览模式不走这里（页面不可命中、Move 不触发），仍由 ManipulationDelta 的 WPF Scale 驱动。</summary>
+    private void ApplyPinchFromTouches()
+    {
+        if (!_viewModel.InkTool.IsInkMode || _viewModel.InkTool.IsMultiFingerInk
+            || IsAnySelectionCoverVisible || _pdfTouchPoints.Count < 2)
+        {
+            _pdfPinchDist = 0;
+            return;
+        }
+        var sv = _pdfScrollViewer;
+        if (sv == null)
+            return;
+
+        double dist = CurrentPinchDistance();
+        if (_pdfGestureKeepStroke && _pdfTouchPoints.Count >= 2 && (++_pinchLogTick % 20 == 0))
+            GestureLog($"缩放: 点数={_pdfTouchPoints.Count}, 距离={dist:F1}, 基准={_pdfPinchDist:F1}, 锁存={_touchGesture}, 倍率={_pdfCumScale:F3}");
+        if (dist < 1)
+        {
+            _pdfPinchDist = 0;
+            return;
+        }
+        if (_pdfPinchDist < 1)
+        {
+            _pdfPinchDist = dist;   // 建立基准，本帧不缩放
+            return;
+        }
+
+        double scale = Math.Clamp(dist / _pdfPinchDist, 1.0 / PinchFrameClamp, PinchFrameClamp);
+        _pdfPinchDist = dist;
+        _pdfCumScale = Math.Clamp(_pdfCumScale * scale, 0.3, 3.0);
+
+        // 手势锁存：累计缩放 ≥3% 才算缩放；未达阈值时不动，平移由 ManipulationDelta 负责
+        if (_touchGesture == TouchGestureKind.Undecided)
+        {
+            if (Math.Abs(_pdfCumScale - 1.0) < 0.03)
+                return;
+            _touchGesture = TouchGestureKind.Zoom;
+        }
+        if (_touchGesture != TouchGestureKind.Zoom || Math.Abs(scale - 1.0) <= 0.001)
+            return;
+
+        double oldZoom = _viewModel.ZoomLevel;
+        if (!_viewModel.ZoomBy(scale))
+            return;   // 已到缩放边界
+        double ratio = _viewModel.ZoomLevel / oldZoom;
+        _isTouchZooming = true;
+
+        System.Windows.Point pos = CurrentTouchCentroid() ?? default;
+        sv.UpdateLayout();
+        sv.ScrollToHorizontalOffset((sv.HorizontalOffset + pos.X) * ratio - pos.X);
+        sv.ScrollToVerticalOffset((sv.VerticalOffset + pos.Y) * ratio - pos.Y);
+    }
+
     /// <summary>第二指落下：非鼠标状态（笔/橡皮/形状/无选区的选择）停墨，让双指走本类接管的平移 + 捏合缩放。
     /// 选区遮罩可见时不抑制——双指继续变换选区（ICA 语义）。</summary>
     private void PdfView_PreviewTouchDown(object? sender, TouchEventArgs e)
     {
         bool palm = IsPalmTouch(e);
-        ConsoleLog.Write("PDF双指手势", $"落下: 设备={e.TouchDevice.Id}, 已有={_pdfActiveTouchIds.Count}, 手掌={palm}, 笔模式={_viewModel.InkTool.IsInkMode}, 工具={_viewModel.InkTool.ActiveTool}");
+        if (_pdfActiveTouchIds.Count >= 1)   // 只在第二指及以后打：单指书写是高频路径，静默
+            GestureLog($"落下: 设备={e.TouchDevice.Id}, 已有={_pdfActiveTouchIds.Count}, 手掌={palm}, 笔模式={_viewModel.InkTool.IsInkMode}, 工具={_viewModel.InkTool.ActiveTool}");
         if (palm)
             return;   // 手掌擦除：手掌接触不计入第 2 指（否则会误触发停墨），也不进 _pdfActiveTouchIds
         if (!_pdfActiveTouchIds.Add(e.TouchDevice.Id))
             return;   // 同一设备重复 Down（防重复计数导致首指时刻不更新）
         if (_pdfActiveTouchIds.Count == 1)
+        {
             _pdfFirstTouchDownMs = Environment.TickCount64;   // 第一指落笔时刻 = 在绘笔画最早点时刻（保留判定用）
+            _pdfPinchDist = 0;
+            _pdfCumScale = 1.0;
+            _pdfTouchPoints.Clear();   // 清上一轮残留，只保留本次真实触点
+        }
+        else
+        {
+            _pdfPinchDist = 0;   // 第二指落下：下一帧 Move 重建两指距离基准
+        }
         _pdfTouchPoints[e.TouchDevice.Id] = e.TouchDevice.GetTouchPoint(PagesScrollViewer).Position;   // 位置跟踪：缩放锚点取实时质心
         _pdfTouchSetChanged = true;   // 换指帧：本帧不应用平移/缩放，防质心/平移量突变跳视图
         if (_viewModel.InkTool.IsMultiFingerInk)
         {
-            ConsoleLog.Write("PDF双指手势", "跳过: 多指书写已开");
+            GestureLog("跳过: 多指书写已开");
             return;   // 多指书写开：不做第 2 指停墨，各指同时落笔成墨
         }
         if (_pdfActiveTouchIds.Count < 2)
             return;   // 单指：正常书写（高频路径，不打日志）
         if (_inkGestureSuppressed)
         {
-            ConsoleLog.Write("PDF双指手势", "跳过: 上一轮抑制未恢复");
+            GestureLog("跳过: 上一轮抑制未恢复");
             return;
         }
         if (!_viewModel.InkTool.IsInkMode || IsAnySelectionCoverVisible)
         {
-            ConsoleLog.Write("PDF双指手势", $"跳过: 非笔模式={!_viewModel.InkTool.IsInkMode}, 选区={IsAnySelectionCoverVisible}");
+            GestureLog($"跳过: 非笔模式={!_viewModel.InkTool.IsInkMode}, 选区={IsAnySelectionCoverVisible}");
             return;
         }
 
-        // 橡皮 + 双指手势成立：先回滚本触摸已擦内容（须在记基线之前；失败也不得阻断下方停墨）
-        try { RevertEraserBatchForGesture(); }
-        catch { }
+        // 橡皮：≥100ms 的擦除落账保留；<100ms 仍回滚（双指缩放不留痕）。须在基线记录之前：回滚会改变 Strokes.Count
+        _pdfGestureKeepErase = false;
+        if (_viewModel.InkTool.ActiveTool == InkToolMode.Eraser)
+        {
+            long age = _pdfFirstTouchDownMs == 0 ? -1 : Environment.TickCount64 - _pdfFirstTouchDownMs;
+            _pdfGestureKeepErase = age >= StrokeKeepMinAgeMs;
+            int replacedCount = ReplacedStroke?.Count ?? 0;
+            int addedCount = AddedStroke?.Count ?? 0;
+            if (_pdfGestureKeepErase)
+                FlushEraserBatch();              // 已擦部分提交为一条擦除历史（保留）
+            else
+            {
+                try { RevertEraserBatchForGesture(); }
+                catch { }
+            }
+            GestureLog($"橡皮: 保留={_pdfGestureKeepErase}, 首指距今={age}ms, 原笔={replacedCount}, 片段={addedCount}");
+        }
 
         // 停墨保留判定（纯时间规则）：第一指已写够 100ms → 这一笔收笔保留，否则仍按原逻辑丢弃
         _pdfGestureKeepStroke = _pdfFirstTouchDownMs != 0
             && Environment.TickCount64 - _pdfFirstTouchDownMs >= StrokeKeepMinAgeMs;
-        ConsoleLog.Write("PDF双指手势", $"停墨判定: 保留={_pdfGestureKeepStroke}, 首指距今={( _pdfFirstTouchDownMs == 0 ? -1 : Environment.TickCount64 - _pdfFirstTouchDownMs)}ms");
+        GestureLog($"停墨判定: 保留={_pdfGestureKeepStroke}, 首指距今={( _pdfFirstTouchDownMs == 0 ? -1 : Environment.TickCount64 - _pdfFirstTouchDownMs)}ms");
 
         foreach (var canvas in _pageInkCanvases)
         {
@@ -1197,8 +1322,6 @@ public partial class MainWindow : Window
             // EditingMode 是 OneWay 绑定，裸赋值会清绑定：摘绑定→置 None→（恢复时接回），同 MainWindow_ShapeDrawing 手法
             var modeProperty = InkCanvas.EditingModeProperty;
             var binding = BindingOperations.GetBindingExpression(canvas, modeProperty);
-            if (binding == null)
-                continue;
             int strokesBefore = canvas.Strokes.Count;
             bool wasInk = canvas.EditingMode == InkCanvasEditingMode.Ink;   // 切 None 后就丢了原模式，先记
             // 采集点必须在切 None 之前取出：切模式会触发整套输入收尾，事后取点可能已被清空
@@ -1206,12 +1329,22 @@ public partial class MainWindow : Window
             bool hasTrace = canvas is PageInkCanvas traceCanvas && traceCanvas.TraceStore.TryTake(out keptPoints);
             if (!_suppressedStrokeBase.ContainsKey(canvas))
                 _suppressedStrokeBase[canvas] = strokesBefore;   // 基线只记一次：恢复时删掉手势期间新增的全部笔画
-            _suppressedEditingBindings[canvas] = binding.ParentBinding;
+            if (binding != null)
+            {
+                _suppressedEditingBindings[canvas] = binding.ParentBinding;
+                BindingOperations.ClearBinding(canvas, modeProperty);
+            }
+            else
+            {
+                // 绑定已脱钩（如之前摘过没接回）：记原模式值，恢复时按值还原，不能整页跳过
+                _suppressedEditingModes[canvas] = canvas.EditingMode;
+            }
             if (_pdfGestureKeepStroke && hasTrace)
                 _gestureKeepPending[canvas] = true;   // 必须在切 None 之前登记：提交可能发生在切换瞬间，守卫要消费它
-            BindingOperations.ClearBinding(canvas, modeProperty);
             canvas.EditingMode = InkCanvasEditingMode.None;
-            canvas.ReleaseAllTouchCaptures();   // 第一指交还 ScrollViewer：否则 Manipulation 只有 1 个 manipulator，Scale 恒 1 → 只能平移
+            // 只打真正有在绘内容的页（采集点为空且笔画数没变的页跳过，避免每页一行刷屏）
+            if (keptPoints.Count > 0 || canvas.Strokes.Count != strokesBefore)
+                GestureLog($"画布: 绑定={(binding != null ? "有" : "无")}, 在绘={wasInk}, 前={strokesBefore}, 后={canvas.Strokes.Count}, 采集点={keptPoints.Count}");
             // 第 1 指落下时 InkCanvas 已开始一笔；切 None 时 WPF 会丢弃在绘湿墨（多数情况下直接丢，抬笔也不再提交）→
             // 不处理就整笔消失。这里把本次输入新增的笔画移除（CodeInput 门：不写撤销历史；
             // PageStrokes_StrokesChanged 的笔画级订阅/_strokePage 簿记仍随事件正常回收）。
@@ -1220,6 +1353,7 @@ public partial class MainWindow : Window
                 if (canvas.Strokes.Count > strokesBefore)
                 {
                     // WPF 这次确实提交了：保住这一笔，把手势基线抬到它之后（RestoreSuppressedInk 不会删）
+                    GestureLog($"停墨保住已提交: 新增={canvas.Strokes.Count - strokesBefore}");
                     _suppressedStrokeBase[canvas] = canvas.Strokes.Count;
                     _gestureKeepPending[canvas] = false;
                 }
@@ -1231,17 +1365,17 @@ public partial class MainWindow : Window
                         keptCanvas.Controller.AbortStrokeKeepPrimary();   // 干墨已重建：清叠加层湿墨，主设备身份保留给仍在按的第一指
                     _suppressedStrokeBase[canvas] = canvas.Strokes.Count;
                     _gestureKeepPending[canvas] = false;
-                    ConsoleLog.Write("PDF双指手势", $"停墨保留重建: 点数={keptPoints.Count}");
+                    GestureLog($"停墨保留重建: 点数={keptPoints.Count}");
                 }
                 else
                 {
                     // 其余情况（无采集点/非 Ink 模式）：保留 keepPending，等抬指后的延迟提交由守卫消费
-                    ConsoleLog.Write("PDF双指手势", $"停墨保留无采集点: 在绘={wasInk}, 已提交={canvas.Strokes.Count > strokesBefore}");
+                    GestureLog($"停墨保留无采集点: 在绘={wasInk}, 已提交={canvas.Strokes.Count > strokesBefore}");
                 }
             }
             else if (canvas.Strokes.Count > strokesBefore)
             {
-                ConsoleLog.Write("PDF双指手势", $"停墨丢弃: 首指距今={(_pdfFirstTouchDownMs == 0 ? -1 : Environment.TickCount64 - _pdfFirstTouchDownMs)}ms, 提交笔画={canvas.Strokes.Count - strokesBefore}");
+                GestureLog($"停墨丢弃: 首指距今={(_pdfFirstTouchDownMs == 0 ? -1 : Environment.TickCount64 - _pdfFirstTouchDownMs)}ms, 提交笔画={canvas.Strokes.Count - strokesBefore}");
                 var interrupted = new StrokeCollection();
                 for (int i = strokesBefore; i < canvas.Strokes.Count; i++)
                     interrupted.Add(canvas.Strokes[i]);
@@ -1262,26 +1396,41 @@ public partial class MainWindow : Window
         _inkGestureSuppressed = true;
     }
 
-    /// <summary>实时手指位置跟踪（缩放锚点=当前质心）：Preview 隧道 + handledEventsToo，InkCanvas 捕获触摸也能收到。</summary>
+    /// <summary>实时手指位置跟踪（缩放锚点=当前质心）：Preview 隧道 + handledEventsToo，InkCanvas 捕获触摸也能收到。
+    /// 手掌手动擦除的逐段擦除也挂这里：画布自身的 TouchMove 在捕获转移后收不到。</summary>
     private void PdfView_PreviewTouchMove(object? sender, TouchEventArgs e)
     {
-        if (_pdfTouchPoints.ContainsKey(e.TouchDevice.Id))
-            _pdfTouchPoints[e.TouchDevice.Id] = e.TouchDevice.GetTouchPoint(PagesScrollViewer).Position;
+        if (_palmManualEraseDevices.TryGetValue(e.TouchDevice.Id, out var palmCanvas))
+        {
+            Point p = e.GetTouchPoint(palmCanvas).Position;
+            Point last = _palmManualEraseLastPoint.TryGetValue(e.TouchDevice.Id, out var l) ? l : p;
+            _palmManualEraseLastPoint[e.TouchDevice.Id] = p;
+            ErasePalmSegment(palmCanvas, last, p, _palmEraseScreenSize / _viewModel.DisplayScale);
+        }
+        if (!_pdfTouchPoints.ContainsKey(e.TouchDevice.Id))
+            return;
+        _pdfTouchPoints[e.TouchDevice.Id] = e.TouchDevice.GetTouchPoint(PagesScrollViewer).Position;
+        ApplyPinchFromTouches();   // 批注模式缩放：触点距离驱动（WPF Manipulation 只剩单 manipulator）
     }
 
     /// <summary>抬指：触摸数归零才恢复墨迹（中途抬一指不恢复，防残留手指误画）。</summary>
     private void PdfView_PreviewTouchUp(object? sender, TouchEventArgs e)
     {
-        if (_pdfActiveTouchIds.Contains(e.TouchDevice.Id))
-            ConsoleLog.Write("PDF双指手势", $"抬起: 设备={e.TouchDevice.Id}, 剩余={_pdfActiveTouchIds.Count - 1}");
-        if (_pdfActiveTouchIds.Remove(e.TouchDevice.Id))
+        EndPalmEraseForDevice(e.TouchDevice.Id);   // 手掌擦除结束（主出口：祖先隧道事件，任何捕获归属都能收到）
+        _pdfTouchPoints.Remove(e.TouchDevice.Id);   // 无条件清理：不依赖计数集合是否同步（残留点会污染两指距离）
+        bool wasTracked = _pdfActiveTouchIds.Remove(e.TouchDevice.Id);
+        if (wasTracked)
+            _pdfTouchSetChanged = true;             // 换指帧：本帧不应用平移/缩放，防质心/平移量突变跳视图
+        if (_pdfActiveTouchIds.Count == 0)
         {
-            _pdfTouchPoints.Remove(e.TouchDevice.Id);   // 位置跟踪同步
-            _pdfTouchSetChanged = true;                 // 换指帧：本帧不应用平移/缩放，防质心/平移量突变跳视图
+            _pdfTouchPoints.Clear();                // 全抬：清空残留点
+            GestureLog("抬起: 全部抬手");
         }
         if (_pdfActiveTouchIds.Count != 0)
             return;
         _pdfFirstTouchDownMs = 0;   // 全部抬指：下一笔重新计时
+        _pdfPinchDist = 0;
+        _pdfCumScale = 1.0;
         // 抬笔丢失兜底：所有手指已抬起，仍有未收笔会话则按最后一点补收笔（防僵尸湿墨/整笔丢失）。
         // 与手势抑制无关，始终执行；延迟到 Background，等原生笔画与抬笔处理先完成。
         foreach (var pageCanvas in _pageInkCanvases)
@@ -1322,9 +1471,6 @@ public partial class MainWindow : Window
         }
 
         bool keepRequested = _pdfGestureKeepStroke;
-        // 上一轮 Restore 若被新手指打断过，基线可能残留：全部抬指后重新开始，先清再记
-        if (_suppressedStrokeBase.Count > 0 && _suppressedEditingBindings.Count == 0)
-            _suppressedStrokeBase.Clear();
         var prev = _currentCommitType;
         _currentCommitType = CommitReason.CodeInput;
         int removedPages = 0;
@@ -1355,19 +1501,24 @@ public partial class MainWindow : Window
             if (pending)
                 stillPending++;
         if (keepRequested || stillPending > 0)
-            ConsoleLog.Write("PDF双指手势", $"恢复: 保留={keepRequested}, 删除页数={removedPages}, 未提交={stillPending}");
+            GestureLog($"恢复: 保留={keepRequested}, 删除页数={removedPages}, 未提交={stillPending}");
         _gestureKeepPending.Clear();
         _pdfGestureKeepStroke = false;
 
         foreach (var (canvas, binding) in _suppressedEditingBindings)
             BindingOperations.SetBinding(canvas, InkCanvas.EditingModeProperty, binding);   // 接回绑定即自动求值回当前工具
         _suppressedEditingBindings.Clear();
+        foreach (var (canvas, mode) in _suppressedEditingModes)
+            canvas.EditingMode = mode;   // 无绑定的页面：按记录的原模式还原
+        _suppressedEditingModes.Clear();
         _inkGestureSuppressed = false;   // 先解除抑制，UpdateEraserShapes 才能恢复真实橡皮形状
         if (_viewModel.InkTool.ActiveTool == InkToolMode.Eraser)
         {
-            RevertEraserBatchForGesture();   // 兜底：回滚手势期间累积的全部擦除（不入撤销历史）
+            RevertEraserBatchForGesture();   // 保留擦除时累加器已被 Flush 清空 → 空操作
             UpdateEraserShapes();            // 恢复真实橡皮形状（按当前面积擦/墨迹擦模式）
+            GestureLog($"橡皮手势结束: 保留={_pdfGestureKeepErase}");
         }
+        _pdfGestureKeepErase = false;
     }
 
     /// <summary>Ctrl + 滚轮缩放：以鼠标指针位置为锚点，同步布局后补偿偏移，避免异步补偿造成的闪烁。</summary>
@@ -1586,15 +1737,12 @@ public partial class MainWindow : Window
         // 手掌擦除：Loaded 可能多次触发，先摘后挂防重复订阅（橡皮菜单「手掌擦除」开关的落笔入口）
         inkCanvas.TouchDown -= PageCanvas_PalmTouchDown;
         inkCanvas.TouchDown += PageCanvas_PalmTouchDown;
-        // 双指手势触摸入口：与画板同款挂在页面画布上（挂在 ScrollViewer 上实测收不到事件 → 停墨逻辑从未生效）
+        // 双指手势触摸入口：Down 挂页面画布（元素级可靠触发）；
+        // Move/Up 挂在祖先 ScrollViewer（见构造函数）——切 None 后触摸归属会变，只有祖先能一直收到。
         if (_pdfTouchDownHandler != null)
         {
             inkCanvas.RemoveHandler(UIElement.PreviewTouchDownEvent, _pdfTouchDownHandler);
             inkCanvas.AddHandler(UIElement.PreviewTouchDownEvent, _pdfTouchDownHandler, true);
-            inkCanvas.RemoveHandler(UIElement.PreviewTouchMoveEvent, _pdfTouchMoveHandler);
-            inkCanvas.AddHandler(UIElement.PreviewTouchMoveEvent, _pdfTouchMoveHandler, true);
-            inkCanvas.RemoveHandler(UIElement.PreviewTouchUpEvent, _pdfTouchUpHandler);
-            inkCanvas.AddHandler(UIElement.PreviewTouchUpEvent, _pdfTouchUpHandler, true);
         }
         // 触摸捕获丢失兜底：Up 可能收不到，残留 id 会让后续 100ms 判定恒 false
         inkCanvas.LostTouchCapture -= PageCanvas_LostTouchCapture;
@@ -1757,27 +1905,15 @@ public partial class MainWindow : Window
         _selfDrawBindings.Remove(pageCanvas);   // 多指书写摘下的原绑定随画布释放，防字典持有已卸载页
         if (pageCanvas.Controller.Overlay.Parent is Panel host)
             host.Children.Remove(pageCanvas.Controller.Overlay);
-        // 手掌擦除：画布卸载即解除订阅；若卸载时正处在手掌擦除中，把 EditingMode 绑定还原，防绑定丢失
+        // 手掌擦除：画布卸载即解除订阅；结束该画布上的全部手掌擦除设备（含 EditingMode 绑定还原）
         pageCanvas.TouchDown -= PageCanvas_PalmTouchDown;
-        if (_palmEraseCanvases.Remove(pageCanvas))
-        {
-            _palmEraseScreenSize = 0;
-            var modeProperty = InkCanvas.EditingModeProperty;
-            var binding = BindingOperations.GetBindingExpression(pageCanvas, modeProperty);
-            if (binding != null)
-                BindingOperations.SetBinding(pageCanvas, modeProperty, binding.ParentBinding);
-            UpdateInkCursor();   // 手掌擦除中的画布卸载：光标按当前工具恢复（归零→笔光标）
-        }
+        EndAllPalmEraseForCanvas(pageCanvas);
         // 停顿强制识别追踪器随页面释放（新文档重建容器时防定时器与事件订阅泄漏）
         if (_pauseTrackers.Remove(pageCanvas, out var tracker))
             tracker.Dispose();
-        // 双指手势触摸入口随页面摘除
+        // 双指手势触摸入口随页面摘除（Down 挂在本画布；Move/Up 在 ScrollViewer 上常驻）
         if (_pdfTouchDownHandler != null)
-        {
             pageCanvas.RemoveHandler(UIElement.PreviewTouchDownEvent, _pdfTouchDownHandler);
-            pageCanvas.RemoveHandler(UIElement.PreviewTouchMoveEvent, _pdfTouchMoveHandler);
-            pageCanvas.RemoveHandler(UIElement.PreviewTouchUpEvent, _pdfTouchUpHandler);
-        }
         pageCanvas.LostTouchCapture -= PageCanvas_LostTouchCapture;
     }
 
@@ -1788,6 +1924,7 @@ public partial class MainWindow : Window
             return;
         if (_pdfActiveTouchIds.Remove(e.TouchDevice.Id))
             _pdfTouchPoints.Remove(e.TouchDevice.Id);
+        EndPalmEraseForDevice(e.TouchDevice.Id);   // 捕获丢失时同样结束手掌擦除，防残留状态
         if (_pdfActiveTouchIds.Count == 0)
         {
             _pdfTouchPoints.Clear();
@@ -1836,20 +1973,24 @@ public partial class MainWindow : Window
         pageCanvas.Controller.PressureEnabled = _viewModel.InkTool.PressureEnabled;
         pageCanvas.Controller.GrowMs = _viewModel.Settings.TimePenGrowMs;
         pageCanvas.Controller.HighlighterPressureEnabled = _viewModel.Settings.HighlighterPressureEnabled;
-        pageCanvas.Controller.SingleDotNoFreezeEnabled = _viewModel.Settings.SingleDotNoFreezeEnabled;
+        pageCanvas.Controller.ShortInkLengthPx = _viewModel.Settings.ShortInkLengthPx;
         pageCanvas.Controller.SetCollectArmed(armed);
         pageCanvas.Controller.SetShieldArmed(shield);
         // 多指书写全自绘：画笔模式下关闭原生命中管线，全部设备由叠加层自绘并自提交。
         // 必须带工具门：橡皮/选择/形状下不能自绘，否则会边擦边写。
-        bool multiFinger = _viewModel.InkTool.IsMultiFingerInk
-                           && _viewModel.InkTool.ActiveTool == InkToolMode.Pen
-                           && _viewModel.InkTool.ShapeDrawMode == 0;
+        bool multiFinger = IsMultiFingerSelfDraw;
         pageCanvas.Controller.SelfDrawAllDevices = multiFinger;
         ApplySelfDrawEditingMode(pageCanvas, multiFinger);
         pageCanvas.DefaultDrawingAttributes.IgnorePressure = ignorePressure;   // 各页共享 VM DA 实例，幂等直改（对齐 ApplyEraserShapeForMode 写法）
     }
 
-    /// <summary>多指书写全自绘时把该页 EditingMode 摘绑并置 None（关原生命中管线），关闭时接回原绑定。
+    /// <summary>多指书写全自绘生效条件（与 ApplyInkArmingTo 共用，必须同源）：画笔工具 + 非形状手绘。</summary>
+    private bool IsMultiFingerSelfDraw
+        => _viewModel.InkTool.IsMultiFingerInk
+           && _viewModel.InkTool.ActiveTool == InkToolMode.Pen
+           && _viewModel.InkTool.ShapeDrawMode == 0;
+
+    /// <summary>多指书写全自绘时把该页 EditingMode 摘绑并置 None（关闭原生命中管线），关闭时接回原绑定。
     /// 原绑定是 XAML 的 OneWay 绑定，直接赋值会丢绑定，必须"摘→赋值→接回"。</summary>
     private void ApplySelfDrawEditingMode(PageInkCanvas canvas, bool selfDraw)
     {
@@ -1869,6 +2010,7 @@ public partial class MainWindow : Window
         else if (_selfDrawBindings.Remove(canvas, out var saved))
         {
             BindingOperations.SetBinding(canvas, modeProperty, saved);
+            EndAllPalmEraseForCanvas(canvas);   // 自绘模式结束：手动手掌擦除语义不再成立，清掉残态
         }
     }
 
@@ -2324,12 +2466,15 @@ public partial class MainWindow : Window
     /// <summary>手掌擦除（仅书写模式，画板 Main_Grid_TouchDown 等价）：摘 EditingMode 绑定 → EraseByPoint，
     /// 尺寸 = 触点接触面积 √(W×H) ÷DisplayScale 抵消整层缩放（判定仍按触点宽度阈值），
     /// 并把光标切为橡皮（UpdateInkCursor 按 _palmEraseCanvases 状态）。
-    /// EditingMode 是 OneWay 绑定，只摘不接（接回会求值回 Ink 覆盖本地值），恢复的唯一出口是 InkCanvas_TouchUp。</summary>
+    /// 多指书写全自绘时 EditingMode 恒为 None，切模式会打断其他手指的会话 → 改走手动擦除（不动 EditingMode）。
+    /// 结束统一走 EndPalmEraseForDevice：触摸捕获转移后画布收不到 Up，必须由 ScrollViewer 隧道兜底。</summary>
     private void PageCanvas_PalmTouchDown(object? sender, TouchEventArgs e)
     {
         if (sender is not InkCanvas canvas || !_viewModel.InkTool.IsInkMode)
             return;
-        if (canvas.EditingMode != InkCanvasEditingMode.Ink)
+        EndPalmEraseForDevice(e.TouchDevice.Id);   // 同设备号再次落下 = 上次抬指丢失，先清残留（防"边写边擦"）
+        bool selfDraw = IsMultiFingerSelfDraw;
+        if (canvas.EditingMode != InkCanvasEditingMode.Ink && !selfDraw)
             return;                                   // 橡皮/选择/形状模式不介入
         if (_inkGestureSuppressed || !IsPalmTouch(e))
             return;                                   // 双指手势进行中让位
@@ -2341,6 +2486,20 @@ public partial class MainWindow : Window
         // 手掌擦除尺寸 = 触点接触面积 ÷3（对齐 ICA：仅 TouchDown 设一次，不随 TouchMove 逐帧更新）
         _palmEraseScreenSize = PalmEraseMetrics.GetTouchFootprintSize(e);          // 光标尺寸与洞同源
         double size = _palmEraseScreenSize / _viewModel.DisplayScale;               // 页面坐标抵消缩放
+
+        if (selfDraw)
+        {
+            // 自绘模式：不切 EditingMode（改动会释放笔捕获、打断其他手指的湿墨），改为手动路径擦除
+            canvas.EraserShape = new RectangleStylusShape(size, InkCircleCursor.EraserBoardHeight(size));
+            _palmManualEraseDevices[e.TouchDevice.Id] = canvas;
+            Point p = e.GetTouchPoint(canvas).Position;
+            _palmManualEraseLastPoint[e.TouchDevice.Id] = p;
+            ErasePalmSegment(canvas, p, p, size);   // 落点立即擦一下（按下即擦，不等移动）
+            _palmEraseCanvases.Add(canvas);
+            UpdateInkCursor();   // 手掌擦除期间光标切为橡皮（尺寸=手掌洞），抬手/卸载恢复
+            return;
+        }
+
         canvas.EraserShape = new RectangleStylusShape(size, InkCircleCursor.EraserBoardHeight(size));
 
         var modeProperty = InkCanvas.EditingModeProperty;                        // 照 CommitPendingPdfStroke 手法
@@ -2349,8 +2508,78 @@ public partial class MainWindow : Window
             BindingOperations.ClearBinding(canvas, modeProperty);
         canvas.EditingMode = InkCanvasEditingMode.EraseByPoint;
 
+        _palmNativeEraseDevices[e.TouchDevice.Id] = canvas;
         _palmEraseCanvases.Add(canvas);
         UpdateInkCursor();   // 手掌擦除期间光标切为橡皮（尺寸=手掌洞），抬手/卸载恢复
+    }
+
+    /// <summary>结束某设备的手掌擦除（幂等）：清映射、按需恢复 EditingMode 与光标、提交擦除批次。
+    /// 由 ScrollViewer 隧道抬指兜底调用——画布自己的 TouchUp 在触摸捕获转移后收不到。</summary>
+    private void EndPalmEraseForDevice(int deviceId)
+    {
+        bool ended = false;
+        if (_palmManualEraseDevices.Remove(deviceId, out var manualCanvas))
+        {
+            _palmManualEraseLastPoint.Remove(deviceId);
+            ended = true;
+            TryReleasePalmCanvas(manualCanvas);   // 手动路径不动 EditingMode（自绘模式由 ApplySelfDrawEditingMode 管理）
+        }
+        if (_palmNativeEraseDevices.Remove(deviceId, out var nativeCanvas))
+        {
+            ended = true;
+            if (TryReleasePalmCanvas(nativeCanvas))
+            {
+                // 原生手掌擦除：先落账，再把 EditingMode 绑定接回（恢复工具同步）
+                FlushEraserBatch();
+                var modeProperty = InkCanvas.EditingModeProperty;
+                var binding = BindingOperations.GetBindingExpression(nativeCanvas, modeProperty);
+                if (binding != null)
+                    BindingOperations.ClearBinding(nativeCanvas, modeProperty);
+                nativeCanvas.EditingMode = _viewModel.InkTool.EditingMode;
+                if (binding != null)
+                    BindingOperations.SetBinding(nativeCanvas, modeProperty, binding.ParentBinding);
+            }
+        }
+        if (!ended)
+            return;
+        FlushEraserBatch();
+        if (_palmEraseCanvases.Count == 0)
+            _palmEraseScreenSize = 0;   // 洞宽归零，光标按当前工具恢复
+        UpdateInkCursor();
+    }
+
+    /// <summary>该画布已无任何手掌在擦时移出擦除集合；返回是否真的移除。</summary>
+    private bool TryReleasePalmCanvas(InkCanvas canvas)
+    {
+        bool stillPalm = _palmManualEraseDevices.Values.Any(v => ReferenceEquals(v, canvas))
+                         || _palmNativeEraseDevices.ContainsValue(canvas);
+        return !stillPalm && _palmEraseCanvases.Remove(canvas);
+    }
+
+    /// <summary>结束某画布上的全部手掌擦除设备（卸载/关闭自绘模式时用）。</summary>
+    private void EndAllPalmEraseForCanvas(InkCanvas canvas)
+    {
+        foreach (var id in _palmManualEraseDevices.Where(kv => ReferenceEquals(kv.Value, canvas)).Select(kv => kv.Key).ToList())
+            EndPalmEraseForDevice(id);
+        foreach (var id in _palmNativeEraseDevices.Where(kv => ReferenceEquals(kv.Value, canvas)).Select(kv => kv.Key).ToList())
+            EndPalmEraseForDevice(id);
+    }
+
+    /// <summary>沿 a→b 按擦除洞尺寸插值取点，交给 StrokeCollection.Erase 做面积擦（与 InkCanvas 面积擦同命中算法）。
+    /// 插值步长取洞宽的 1/3，保证快速拖动不留缝。</summary>
+    private static void ErasePalmSegment(InkCanvas canvas, Point a, Point b, double size)
+    {
+        if (canvas.Strokes.Count == 0)
+            return;
+        size = Math.Max(1.0, size);
+        var shape = new RectangleStylusShape(size, InkCircleCursor.EraserBoardHeight(size));
+        double dist = (b - a).Length;
+        int steps = Math.Max(1, (int)Math.Ceiling(dist / Math.Max(1.0, size / 3)));
+        var points = new List<Point>(steps);
+        for (int i = 1; i <= steps; i++)
+            points.Add(new Point(a.X + (b.X - a.X) * i / steps, a.Y + (b.Y - a.Y) * i / steps));
+        try { canvas.Strokes.Erase(points, shape); }
+        catch { }   // 集合在途变化（滚出卸载等）不阻断主流程
     }
 
     /// <summary>双指手势期间彻底禁止擦除：WPF 的擦除命中测试器在落笔时锁定 EraserShape
@@ -2384,19 +2613,7 @@ public partial class MainWindow : Window
         if (!(_inkGestureSuppressed && _viewModel.InkTool.ActiveTool == InkToolMode.Eraser))
             FlushEraserBatch();   // 双指手势期间橡皮批处理只累积（结束时回滚），其余照旧提交
 
-        if (_palmEraseCanvases.Remove(inkCanvas))
-        {
-            _palmEraseScreenSize = 0;   // 手掌抬起：洞宽归零，光标按当前工具恢复
-
-            var modeProperty = InkCanvas.EditingModeProperty;
-            var binding = BindingOperations.GetBindingExpression(inkCanvas, modeProperty);
-            if (binding != null)
-                BindingOperations.ClearBinding(inkCanvas, modeProperty);
-            inkCanvas.EditingMode = _viewModel.InkTool.EditingMode;   // 先回显当前工具模式
-            if (binding != null)
-                BindingOperations.SetBinding(inkCanvas, modeProperty, binding.ParentBinding);   // 接回即恢复工具同步
-            UpdateInkCursor();   // 手掌擦除结束：光标按当前工具恢复（归零→笔光标）
-        }
+        EndPalmEraseForDevice(e.TouchDevice.Id);   // 画布能收到 Up 时照常清理（幂等兜底；主出口在 ScrollViewer 隧道）
     }
 
     /// <summary>累加器存在即无条件提交并复位（画板 inkCanvas_MouseUp L258-266 逐行等价）。</summary>
@@ -2488,9 +2705,12 @@ public partial class MainWindow : Window
             return;   // 画板 L228 等价：回放门 + 形状预览门
 
         // 面积擦：原笔 Removed + 拆分 Added 都记入平铺累加器，MouseUp/TouchUp 统一提交（画板 L229-236 等价）；
-        // 手掌擦除虽在书写模式下触发，但同样是 EraseByPoint 拆分，必须走同一累加器否则撤销错乱
+        // 手掌擦除虽在书写模式下触发，但同样是 EraseByPoint 拆分，必须走同一累加器否则撤销错乱。
+        // 手掌擦除期间纯新增（其他手指完成的一笔）不算擦除，落到下方按 UserInput 正常提交，避免写入被混进擦除历史。
+        bool eraserTool = _viewModel.InkTool.ActiveTool == InkToolMode.Eraser;
+        bool palmErasing = _palmEraseCanvases.Count > 0;
         if ((e.Added.Count != 0 || e.Removed.Count != 0)
-            && (_viewModel.InkTool.ActiveTool == InkToolMode.Eraser || _palmEraseCanvases.Count > 0))
+            && (eraserTool || (palmErasing && e.Removed.Count != 0)))
         {
             AddedStroke ??= new StrokeCollection();
             ReplacedStroke ??= new StrokeCollection();

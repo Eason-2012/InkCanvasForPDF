@@ -278,8 +278,8 @@ public sealed class TimePressureController
     /// <summary>「荧光笔启用压力感应」开关：关闭（默认）时荧光笔湿墨封顶压力恒 0.5（等粗），开启时吃硬件压力。</summary>
     public bool HighlighterPressureEnabled { get; set; }
 
-    /// <summary>「单墨迹点抬手后不定格」开关：开启（默认）时单点圆点抬笔后逐帧补长至终宽，关闭时按点龄一次性定格。</summary>
-    public bool SingleDotNoFreezeEnabled { get; set; } = true;
+    /// <summary>「墨迹过短关闭笔锋」阈值（px，页面坐标）：折线总长度小于该值的笔画抬笔后逐帧补长至终宽；0 = 关闭（默认 1px）。</summary>
+    public double ShortInkLengthPx { get; set; } = 1.0;
 
     /// <summary>自绘笔画提交事件（UI 线程）：宿主 Add 到 Strokes 并走既有收笔处理（笔锋改写/墨迹纠正/撤销）。</summary>
     public event Action<Stroke, int>? StrokeReady;
@@ -894,7 +894,7 @@ public sealed class TimePressureController
             double t0 = haveSamples ? snapshot[0].T : 0.0;
 
             var rebuilt = new StylusPointCollection();
-            double birth0 = 0, cap0 = 0;   // 单点补长用：唯一点的出生时刻与终压
+            var growth = new List<(double Birth, double Cap, int Index)>();   // 过短墨迹补长用：各点出生时刻与终压
             for (int i = 0; i < count; i++)
             {
                 double birth;
@@ -923,28 +923,43 @@ public sealed class TimePressureController
 
                 double age = now - birth;
                 double pressure = tip + (cap - tip) * Math.Min(1.0, Math.Max(0.0, age / Math.Max(1.0, growMs)));
-                if (i == 0)
-                {
-                    birth0 = birth;
-                    cap0 = cap;
-                }
+                growth.Add((birth, cap, i));
                 rebuilt.Add(new StylusPoint(stylusPoints[i].X, stylusPoints[i].Y, (float)pressure));
             }
             stroke.StylusPoints = rebuilt;
 
-            // 单点圆点：抬笔时点龄不足 → 不定格，逐帧补长至终宽（补足剩余生长时间）
-            if (SingleDotNoFreezeEnabled && count == 1 && clock is not null && GrowMs - (now - birth0) > 1.0)
-                StartDotGrowth(stroke, birth0, cap0, tip, clock, growMs);
+            // 墨迹过短：抬笔后不定格，逐帧生长至终宽（长度阈值按屏幕 px 换算到页面坐标，口径同 TipPressure）
+            double thresholdPage = ShortInkLengthPx / Math.Max(0.01, DisplayScale);
+            if (clock is not null && ShortInkLengthPx > 0 && StrokeLength(stylusPoints) < thresholdPage)
+            {
+                double lastBirth = growth.Count > 0 ? growth[^1].Birth : now;
+                if (GrowMs - (now - lastBirth) > 1.0)
+                    StartShortStrokeGrowth(stroke, growth, tip, clock, growMs);
+            }
         }
 
         EndSession(deviceId);
     }
 
-    /// <summary>单点圆点补长：抬笔定格时点龄未满 GrowMs，不停格在针尖细线，
-    /// 用短生命周期 DispatcherTimer 逐帧把该点压力按生长公式补到终宽（补足剩余生长时间）。
+    /// <summary>折线总长度（页面坐标）：相邻 StylusPoint 距离累加。</summary>
+    private static double StrokeLength(StylusPointCollection points)
+    {
+        double total = 0;
+        for (int i = 1; i < points.Count; i++)
+        {
+            double dx = points[i].X - points[i - 1].X;
+            double dy = points[i].Y - points[i - 1].Y;
+            total += Math.Sqrt(dx * dx + dy * dy);
+        }
+        return total;
+    }
+
+    /// <summary>过短墨迹补长：抬笔时末点点龄未满 GrowMs，不停格在细线/针尖，
+    /// 用短生命周期 DispatcherTimer 逐帧按各点出生时刻重算压力，直到所有点长满 GrowMs。
     /// 只改压力不改坐标：不触发 StrokeCollected、不写撤销历史；笔画若已被擦除/撤销，
     /// 改写一个不在集合中的 Stroke 无可见效果，无需成员校验。</summary>
-    private void StartDotGrowth(Stroke stroke, double birth, double cap, double tip, Stopwatch clock, double growMs)
+    private void StartShortStrokeGrowth(Stroke stroke, List<(double Birth, double Cap, int Index)> growth,
+        double tip, Stopwatch clock, double growMs)
     {
         var timer = new DispatcherTimer(DispatcherPriority.Render, _overlay.Dispatcher)
         {
@@ -952,13 +967,20 @@ public sealed class TimePressureController
         };
         timer.Tick += (_, _) =>
         {
-            double age = clock.Elapsed.TotalMilliseconds - birth;
-            double pressure = tip + (cap - tip) * Math.Min(1.0, Math.Max(0.0, age / Math.Max(1.0, growMs)));
-            var points = new StylusPointCollection(1);
-            var src = stroke.StylusPoints[0];
-            points.Add(new StylusPoint(src.X, src.Y, (float)pressure));
+            double nowMs = clock.Elapsed.TotalMilliseconds;
+            var points = new StylusPointCollection(growth.Count);
+            bool allGrown = true;
+            foreach (var (birth, cap, index) in growth)
+            {
+                double age = nowMs - birth;
+                if (age < growMs)
+                    allGrown = false;
+                double pressure = tip + (cap - tip) * Math.Min(1.0, Math.Max(0.0, age / Math.Max(1.0, growMs)));
+                var src = stroke.StylusPoints[index];
+                points.Add(new StylusPoint(src.X, src.Y, (float)pressure));
+            }
             stroke.StylusPoints = points;
-            if (age >= growMs)
+            if (allGrown)
             {
                 timer.Stop();
                 timer = null!;
