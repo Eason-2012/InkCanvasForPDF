@@ -12,6 +12,7 @@ public static class SystemVolumeService
         {
             using var enumerator = new MMDeviceEnumerator();
             using var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+            device.AudioEndpointVolume.Mute = false;   // 先解除静音，再拉音量
             device.AudioEndpointVolume.MasterVolumeLevelScalar = 1f;
             return true;
         }

@@ -293,6 +293,11 @@ public sealed class TimePressureController
         if (_collectArmed == armed)
             return;
         _collectArmed = armed;
+        lock (_sync)
+        {
+            _downDevices.Clear();       // 武装切换 = 工具上下文已变：旧的"落笔中"登记不可信，清掉防残留设备毒化新主设备
+            _primaryDeviceId = -1;
+        }
         if (!armed)
             AbortStroke();
     }
@@ -304,6 +309,11 @@ public sealed class TimePressureController
         if (_shieldArmed == armed)
             return;
         _shieldArmed = armed;
+        lock (_sync)
+        {
+            _downDevices.Clear();       // 同上：切换武装状态时丢弃落笔中登记
+            _primaryDeviceId = -1;
+        }
         if (!armed)
             AbortStroke();
     }
@@ -345,7 +355,18 @@ public sealed class TimePressureController
     }
 
     /// <summary>中断指定设备的会话（手掌擦除等：只丢弃该设备的湿墨，不影响其他手指）。</summary>
-    public void AbortStroke(int deviceId) => EndSession(deviceId);
+    public void AbortStroke(int deviceId)
+    {
+        lock (_sync)
+        {
+            // 被丢弃的设备不再具备主设备资格：否则它若先落笔（如手掌），主设备身份会被占住，
+            // 真正书写的设备永远采集不到湿墨（抬笔丢失时更会长期残留）
+            _downDevices.Remove(deviceId);
+            if (_primaryDeviceId == deviceId)
+                _primaryDeviceId = -1;
+        }
+        EndSession(deviceId);
+    }
 
     /// <summary>停止全部会话继续收点，但保留已采样本与叠加层湿墨（供随后的收笔定格）。
     /// 双指手势中断笔画但保留这一笔时调用；与 <see cref="AbortStroke()"/> 的区别只在"不销毁会话"。</summary>
@@ -394,17 +415,19 @@ public sealed class TimePressureController
     {
         lock (_sync)
         {
+            // 未武装（橡皮/选择等工具）时绝不登记：落笔在这里被记成"主设备"后，若抬笔事件丢失，
+            // 该设备会一直占据 _downDevices/_primaryDeviceId，切回墨迹后新笔被判为非主设备 →
+            // 不采集、叠加层不画，而 DynamicRenderer 又屏蔽默认湿墨 → 湿墨全空（切鼠标再切回才恢复）。
+            if (!_selfDrawAllDevices && !_collectArmed && !_shieldArmed)
+                return false;
             _downDevices.Add(deviceId);
             // 主设备 = 当前落笔中的第一支（InkCanvas 原生收墨的那支）。上一支已抬起则改认本支，
             // 保证连续快速落笔都能拿到"主设备"身份（不影响尚未定格的上一条笔画：定格按 id 取会话）。
             if (_primaryDeviceId == -1 || !_downDevices.Contains(_primaryDeviceId))
                 _primaryDeviceId = deviceId;
-            bool primary = deviceId == _primaryDeviceId;
             if (_selfDrawAllDevices)
                 return true;
-            if (_collectArmed || _shieldArmed)
-                return primary;
-            return false;
+            return deviceId == _primaryDeviceId;
         }
     }
 
@@ -582,6 +605,11 @@ public sealed class TimePressureController
             session.UpElapsedMs = Math.Max(1.0, session.LastSampleElapsedMs);
             tabletDeviceId = session.TabletDeviceId;
             samples = session.Samples.Count;
+            // 已判定为僵死（长时间无采样）＝该设备实际早已抬起、抬笔事件丢失：撤掉主设备登记，
+            // 防它占着第一支身份让后续真正书写的手/笔采集不到湿墨
+            _downDevices.Remove(deviceId);
+            if (_primaryDeviceId == deviceId)
+                _primaryDeviceId = -1;
         }
         ConsoleLog.Write("时间笔锋", $"丢失抬笔补收笔 dev={deviceId} 采样={samples}");
         if (ShouldCommitOnUp(deviceId, tabletDeviceId))

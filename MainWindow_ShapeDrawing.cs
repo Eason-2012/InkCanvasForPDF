@@ -41,6 +41,16 @@ public partial class MainWindow : Window
 
     private readonly List<int> shapeTouchIds = new List<int>();   //正在触控的设备 id（多指取消用）
 
+    /// <summary>复位形状输入门控（切形状/退出形状/文档切换/触摸捕获丢失时调用）。
+    /// 只清"下一次输入能否进入"的标志，不动临时笔画与收尾标志——ShapeDrawingMouseUp 内部会先调
+    /// SetActiveTool(Pen) 再提交历史，这里清临时笔画会让提交落空。</summary>
+    internal void ResetShapeInputState()
+    {
+        shapeTouchIds.Clear();
+        shapeIsWaitUntilNextTouchDown = false;
+        shapeIsMouseDown = false;
+    }
+
     private int ShapeDrawMode => _viewModel.InkTool.ShapeDrawMode;
 
     /// <summary>两点距离（ICA GetDistance 原样）。</summary>
