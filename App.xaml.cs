@@ -58,7 +58,9 @@ public partial class App : Application
             try
             {
                 var full = Path.GetFullPath(arg);
-                if (string.Equals(Path.GetExtension(full), ".pdf", StringComparison.OrdinalIgnoreCase)
+                if ((string.Equals(Path.GetExtension(full), ".pdf", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(Path.GetExtension(full), ".doc", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(Path.GetExtension(full), ".docx", StringComparison.OrdinalIgnoreCase))
                     && File.Exists(full))
                 {
                     StartupFilePath = full;

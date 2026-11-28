@@ -500,8 +500,8 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     {
         var dialog = new OpenFileDialog
         {
-            Filter = "PDF 文件 (*.pdf)|*.pdf",
-            Title = "打开 PDF"
+            Filter = "文档 (*.pdf;*.doc;*.docx)|*.pdf;*.doc;*.docx",
+            Title = "打开文档"
         };
 
         if (dialog.ShowDialog() != true) return;
@@ -532,6 +532,17 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
             var sizes = await Task.Run(() =>
             {
                 var sizeSw = Stopwatch.StartNew();
+                var fileInfo = new FileInfo(path);
+                if (fileInfo.Extension.Equals(".doc", StringComparison.OrdinalIgnoreCase)
+                    || fileInfo.Extension.Equals(".docx", StringComparison.OrdinalIgnoreCase))
+                {
+                    string targetDir = Path.Combine(AppContext.BaseDirectory, "Data", "Temp");
+                    if (!Directory.Exists(targetDir))
+                        Directory.CreateDirectory(targetDir);
+                    string targetPath = Path.Combine(targetDir, fileInfo.Name + ".pdf");
+                    DocumentConverter.Convert(false, path, targetPath);
+                    path = targetPath;
+                }
                 _pdf.OpenDocument(path, password);
                 long openMs = sizeSw.ElapsedMilliseconds;   // 仅打开文档（解析交叉引用/页树）
                 var pageSizes = new PageSize[_pdf.PageCount];
